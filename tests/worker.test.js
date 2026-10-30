@@ -58,5 +58,5 @@ test("تقييد أوامر الإدارة والأزرار على جروب ال
   q.callback_query.message.chat.id = -200;
   await tgHook(env, q);
   assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
-  assert.equal(env.db.prepare("SELECT status FROM orders").get(), null);
+  assert.equal(env.db.prepare("SELECT status FROM orders").get(), undefined);
 });
