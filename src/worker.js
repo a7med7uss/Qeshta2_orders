@@ -45,6 +45,13 @@ async function order(req, env) {
   if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
+  // Idempotent retries must work even when the original one-use Turnstile token has expired.
+  try {
+    const prior = await env.DB.prepare("SELECT code FROM orders WHERE idem_key=?").bind(b.idem).first();
+    if (prior) return J({ ok: true, code: prior.code, duplicate: true });
+  } catch {
+    return J({ error: "تعذر التحقق من الطلب، حاول مرة أخرى" }, 503);
+  }
   // Fail closed: public order creation is unavailable until Turnstile is configured.
   if (!env.TURNSTILE_SECRET) return J({ error: "خدمة التحقق غير جاهزة، حاول لاحقاً" }, 503);
   const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
@@ -59,10 +66,6 @@ async function order(req, env) {
   const o = { name, phone, address, lat, lng, pay: b.pay, subtotal: priced.subtotal, total: priced.total, created_at: new Date().toISOString() };
   let id = null;
   try {
-    // Check idempotency before rate limiting so a legitimate client retry returns the original order.
-    const prior = await env.DB.prepare("SELECT id,code FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (prior) return J({ ok: true, code: prior.code, duplicate: true });
-
     const recent = await env.DB.prepare(`SELECT COUNT(*) c FROM orders WHERE phone=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')`).bind(phone).first();
     if (recent.c >= 3) return J({ error: "عدد الطلبات كبير، اتصل بنا من فضلك" }, 429);
     const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,total) VALUES(?,?,?,?,?,?,?,?,0,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, o.total).run();
