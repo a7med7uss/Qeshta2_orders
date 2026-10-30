@@ -50,6 +50,10 @@ test("تقييد أوامر الإدارة والأزرار على جروب ال
   await tgHook(env, { message: { text: "/pending", from: { id: 6681233049 }, chat: { id: -200 }, message_id: 7 } });
   assert.equal(sent.length, 0, "يجب تجاهل أوامر الإدارة من خارج الجروب المحدد");
 
+  await tgHook(env, { message: { text: "/myid", from: { id: 777 }, chat: { id: 777 }, message_id: 71 } });
+  assert.ok(sent.some(x => x.u === "sendMessage" && x.b.text.includes("777")), "/myid remains available in private chats");
+  sent.length = 0;
+
   await tgHook(env, { message: { text: "/chatid", from: { id: 6681233049 }, chat: { id: -200 }, message_id: 8 } });
   assert.ok(sent.some(x => x.u === "sendMessage" && x.b.text.includes("-200")), "المالك يستطيع معرفة معرّف جروب الاختبار");
 
