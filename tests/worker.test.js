@@ -105,3 +105,13 @@ test("تنظيف سجل الطلب إذا فشل حفظ تفاصيله في D1",
   const message = sent.find(x => x.u === "sendMessage").b.text;
   assert.match(message, /لم يُحفظ في القاعدة/);
 });
+
+test("رفض الطلب إذا كانت إعدادات تشغيل البوت أو الجروب أو الأسرار ناقصة", async () => {
+  for (const key of ["BOT_TOKEN", "CHAT_ID", "WEBHOOK_SECRET", "TURNSTILE_SECRET"]) {
+    const env = mkEnv(); env[key] = ""; sent.length = 0;
+    const r = await post(env, "/api/order", ok);
+    assert.equal(r.status, 503, key);
+    assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0, key);
+    assert.equal(sent.filter(x => x.u === "sendMessage").length, 0, key);
+  }
+});
