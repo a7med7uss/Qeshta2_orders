@@ -44,3 +44,19 @@ test("إضافة موظف بالرد وحذفه (المالك فقط)", async ()
   await tgHook(env, { message: { text: "/removestaff 555", from: { id: 6681233049 }, chat: { id: -100 }, message_id: 2 } }); sent.length = 0; await tgHook(env, press(555, "out_for_delivery"));
   assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "مش مسموح لك");
 });
+
+test("تقييد أوامر الإدارة والأزرار على جروب الإدارة مع إتاحة /chatid للمالك", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await tgHook(env, { message: { text: "/pending", from: { id: 6681233049 }, chat: { id: -200 }, message_id: 7 } });
+  assert.equal(sent.length, 0, "يجب تجاهل أوامر الإدارة من خارج الجروب المحدد");
+
+  await tgHook(env, { message: { text: "/chatid", from: { id: 6681233049 }, chat: { id: -200 }, message_id: 8 } });
+  assert.ok(sent.some(x => x.u === "sendMessage" && x.b.text.includes("-200")), "المالك يستطيع معرفة معرّف جروب الاختبار");
+
+  sent.length = 0;
+  const q = press(6681233049, "confirmed");
+  q.callback_query.message.chat.id = -200;
+  await tgHook(env, q);
+  assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
+  assert.equal(env.db.prepare("SELECT status FROM orders").get(), null);
+});
