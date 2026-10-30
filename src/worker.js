@@ -33,35 +33,51 @@ async function order(req, env) {
   let b; try { b = await req.json(); } catch { return J({ error: "طلب غير صالح" }, 400); }
   if (b.hp) return J({ ok: true, code: "QST-0000" }); // حقل مخفي للبوتات
   const name = String(b.name || "").trim().replace(/\s+/g, " "), phone = String(b.phone || "").replace(/[\s-]/g, "");
-  const address = String(b.address || "").trim().slice(0, 300), lat = Number(b.lat) || null, lng = Number(b.lng) || null;
+  const address = String(b.address || "").trim().slice(0, 300);
+  const rawLat = b.lat === null || b.lat === undefined || b.lat === "" ? null : Number(b.lat);
+  const rawLng = b.lng === null || b.lng === undefined || b.lng === "" ? null : Number(b.lng);
+  const hasCoordinates = Number.isFinite(rawLat) && Number.isFinite(rawLng) &&
+    rawLat >= -90 && rawLat <= 90 && rawLng >= -180 && rawLng <= 180;
+  const lat = hasCoordinates ? rawLat : null, lng = hasCoordinates ? rawLng : null;
   if (name.split(" ").length < 2 || name.length > 60) return J({ error: "اكتب الاسم الثنائي" }, 400);
   if (!/^01[0125]\d{8}$/.test(phone)) return J({ error: "رقم الموبايل غير صحيح" }, 400);
-  if (!address && !lat) return J({ error: "حدد العنوان أو موقعك" }, 400);
+  if ((b.lat != null || b.lng != null) && !hasCoordinates) return J({ error: "الموقع الجغرافي غير صالح" }, 400);
+  if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
-  if (env.TURNSTILE_SECRET) {
-    const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
-    const v = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: f }).then(r => r.json()).catch(() => ({}));
-    if (!v.success) return J({ error: "فشل التحقق، حاول مرة أخرى" }, 403);
-  }
-  const raw = (Array.isArray(b.lines) ? b.lines : []).slice(0, 40);
+  // Fail closed: public order creation is unavailable until Turnstile is configured.
+  if (!env.TURNSTILE_SECRET) return J({ error: "خدمة التحقق غير جاهزة، حاول لاحقاً" }, 503);
+  const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
+  const v = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: f }).then(r => r.json()).catch(() => ({}));
+  if (!v.success) return J({ error: "فشل التحقق، حاول مرة أخرى" }, 403);
+
+  const raw = Array.isArray(b.lines) ? b.lines : [];
+  if (raw.length > 40) return J({ error: "عدد الأصناف في الطلب أكبر من المسموح" }, 400);
   let priced; try { priced = priceCart(MENU, raw.map(l => ({ id: String(l.id), amount: Number(l.amount), qty: Number(l.qty) }))); } catch (e) { return J({ error: e.message }, 400); }
   if (!priced.lines.length) return J({ error: "السلة فاضية" }, 400);
   const items = priced.lines.map((l, i) => ({ ...l, note: String(raw[i].note || "").slice(0, 120) }));
   const o = { name, phone, address, lat, lng, pay: b.pay, subtotal: priced.subtotal, total: priced.total, created_at: new Date().toISOString() };
   let id = null;
   try {
+    // Check idempotency before rate limiting so a legitimate client retry returns the original order.
+    const prior = await env.DB.prepare("SELECT id,code FROM orders WHERE idem_key=?").bind(b.idem).first();
+    if (prior) return J({ ok: true, code: prior.code, duplicate: true });
+
     const recent = await env.DB.prepare(`SELECT COUNT(*) c FROM orders WHERE phone=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')`).bind(phone).first();
     if (recent.c >= 3) return J({ error: "عدد الطلبات كبير، اتصل بنا من فضلك" }, 429);
     const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,total) VALUES(?,?,?,?,?,?,?,?,0,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, o.total).run();
     const row = await env.DB.prepare("SELECT id,code FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // منع التكرار
+    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // طلب متزامن بنفس مفتاح المنع
     id = row.id; o.code = "QST-" + String(id).padStart(4, "0");
     await env.DB.batch([
       env.DB.prepare("UPDATE orders SET code=? WHERE id=?").bind(o.code, id),
       ...items.map(i => env.DB.prepare("INSERT INTO order_items(order_id,item_ref,name,size,qty,base_price,chosen_price,note) VALUES(?,?,?,?,?,?,?,?)").bind(id, i.id, i.name, i.size, i.qty, i.base, i.pend ? -1 : i.unit, i.note || null)),
       env.DB.prepare("INSERT INTO order_events(order_id,event) VALUES(?,'created')").bind(id)]);
-  } catch (e) { o.dbFail = true; o.code = "QST-E" + (Date.now() % 100000); id = null; }
+  } catch (e) {
+    // D1 batch is transactional, but the initial order insert is separate: remove the shell row if details failed.
+    if (id !== null) await env.DB.prepare("DELETE FROM orders WHERE id=?").bind(id).run().catch(() => {});
+    o.dbFail = true; o.code = "QST-E" + (Date.now() % 100000); id = null;
+  }
   await sendOrder(env, id, o, items); // إن فشل الإرسال يعيده Cron كل دقيقة
   return J({ ok: true, code: o.code });
 }
