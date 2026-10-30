@@ -32,6 +32,9 @@ async function sendOrder(env, id, o, items) {
 async function order(req, env) {
   let b; try { b = await req.json(); } catch { return J({ error: "طلب غير صالح" }, 400); }
   if (b.hp) return J({ ok: true, code: "QST-0000" }); // حقل مخفي للبوتات
+  if (!env.BOT_TOKEN || !env.CHAT_ID || !env.WEBHOOK_SECRET || !env.TURNSTILE_SECRET) {
+    return J({ error: "نظام الطلبات غير جاهز لاستقبال الطلبات حالياً" }, 503);
+  }
   const name = String(b.name || "").trim().replace(/\s+/g, " "), phone = String(b.phone || "").replace(/[\s-]/g, "");
   const address = String(b.address || "").trim().slice(0, 300);
   const rawLat = b.lat === null || b.lat === undefined || b.lat === "" ? null : Number(b.lat);
