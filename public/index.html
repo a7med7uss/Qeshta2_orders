@@ -105,7 +105,7 @@ function openCheckout() {
   $("#sheet").hidden = false;
   if (window.turnstile) { ts = turnstile.render("#ts", { sitekey: "0x4AAAAAAFcZSjYMCjWyaO2h", callback: t => tok = t, "expired-callback": () => tok = "" }); }
 }
-async async function submit() {
+async function submit() {
   const g = id => $(id).value.trim(), er = m => $("#er").textContent = m;
   const body = { idem, name: g("#nm"), phone: g("#ph"), address: g("#ad"), lat: loc?.lat, lng: loc?.lng, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
   $("#go").disabled = true; er("");
