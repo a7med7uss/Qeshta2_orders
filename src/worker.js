@@ -127,8 +127,9 @@ async function hook(req, env) {
     } else if (u.message?.text?.startsWith("/")) {
       const m = u.message;
       const command = m.text.trim().split(/\s+/)[0].split("@")[0];
+      const publicMyIdLookup = command === "/myid";
       const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
-      if (ownerChatIdLookup || (adminChat && String(m.chat?.id) === adminChat)) {
+      if (publicMyIdLookup || ownerChatIdLookup || (adminChat && String(m.chat?.id) === adminChat)) {
         await onCommand(m, env);
       }
     }
