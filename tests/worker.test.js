@@ -76,11 +76,13 @@ test("رفض الطلب إذا كان Turnstile secret غير مضبوط", async
 test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات", async () => {
   const env = mkEnv(); sent.length = 0;
   await post(env, "/api/order", ok);
+  const verifiedBeforeReplay = sent.filter(x => x.u === "siteverify").length;
   env.db.prepare("INSERT INTO orders(idem_key,customer_name,phone,payment_method,subtotal,total) VALUES('other-1','اسم تجريبي','01012345678','cash',0,0)").run();
   env.db.prepare("INSERT INTO orders(idem_key,customer_name,phone,payment_method,subtotal,total) VALUES('other-2','اسم تجريبي','01012345678','cash',0,0)").run();
   const replay = await (await post(env, "/api/order", ok)).json();
   assert.equal(replay.duplicate, true);
   assert.equal(replay.code, "QST-0001");
+  assert.equal(sent.filter(x => x.u === "siteverify").length, verifiedBeforeReplay, "replay should not reuse/verify the one-use Turnstile token");
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 3);
   assert.equal(sent.filter(x => x.u === "sendMessage").length, 1);
 });
