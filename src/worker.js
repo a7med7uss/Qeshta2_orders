@@ -32,19 +32,37 @@ async function sendOrder(env, id, o, items) {
 async function order(req, env) {
   let b; try { b = await req.json(); } catch { return J({ error: "طلب غير صالح" }, 400); }
   if (b.hp) return J({ ok: true, code: "QST-0000" }); // حقل مخفي للبوتات
+  if (!env.BOT_TOKEN || !env.CHAT_ID || !env.WEBHOOK_SECRET || !env.TURNSTILE_SECRET) {
+    return J({ error: "نظام الطلبات غير جاهز لاستقبال الطلبات حالياً" }, 503);
+  }
   const name = String(b.name || "").trim().replace(/\s+/g, " "), phone = String(b.phone || "").replace(/[\s-]/g, "");
-  const address = String(b.address || "").trim().slice(0, 300), lat = Number(b.lat) || null, lng = Number(b.lng) || null;
+  const address = String(b.address || "").trim().slice(0, 300);
+  const rawLat = b.lat === null || b.lat === undefined || b.lat === "" ? null : Number(b.lat);
+  const rawLng = b.lng === null || b.lng === undefined || b.lng === "" ? null : Number(b.lng);
+  const hasCoordinates = Number.isFinite(rawLat) && Number.isFinite(rawLng) &&
+    rawLat >= -90 && rawLat <= 90 && rawLng >= -180 && rawLng <= 180;
+  const lat = hasCoordinates ? rawLat : null, lng = hasCoordinates ? rawLng : null;
   if (name.split(" ").length < 2 || name.length > 60) return J({ error: "اكتب الاسم الثنائي" }, 400);
   if (!/^01[0125]\d{8}$/.test(phone)) return J({ error: "رقم الموبايل غير صحيح" }, 400);
-  if (!address && !lat) return J({ error: "حدد العنوان أو موقعك" }, 400);
+  if ((b.lat != null || b.lng != null) && !hasCoordinates) return J({ error: "الموقع الجغرافي غير صالح" }, 400);
+  if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
-  if (env.TURNSTILE_SECRET) {
-    const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
-    const v = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: f }).then(r => r.json()).catch(() => ({}));
-    if (!v.success) return J({ error: "فشل التحقق، حاول مرة أخرى" }, 403);
+  // Idempotent retries must work even when the original one-use Turnstile token has expired.
+  try {
+    const prior = await env.DB.prepare("SELECT code FROM orders WHERE idem_key=?").bind(b.idem).first();
+    if (prior) return J({ ok: true, code: prior.code, duplicate: true });
+  } catch {
+    return J({ error: "تعذر التحقق من الطلب، حاول مرة أخرى" }, 503);
   }
-  const raw = (Array.isArray(b.lines) ? b.lines : []).slice(0, 40);
+  // Fail closed: public order creation is unavailable until Turnstile is configured.
+  if (!env.TURNSTILE_SECRET) return J({ error: "خدمة التحقق غير جاهزة، حاول لاحقاً" }, 503);
+  const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
+  const v = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", body: f }).then(r => r.json()).catch(() => ({}));
+  if (!v.success) return J({ error: "فشل التحقق، حاول مرة أخرى" }, 403);
+
+  const raw = Array.isArray(b.lines) ? b.lines : [];
+  if (raw.length > 40) return J({ error: "عدد الأصناف في الطلب أكبر من المسموح" }, 400);
   let priced; try { priced = priceCart(MENU, raw.map(l => ({ id: String(l.id), amount: Number(l.amount), qty: Number(l.qty) }))); } catch (e) { return J({ error: e.message }, 400); }
   if (!priced.lines.length) return J({ error: "السلة فاضية" }, 400);
   const items = priced.lines.map((l, i) => ({ ...l, note: String(raw[i].note || "").slice(0, 120) }));
@@ -55,13 +73,17 @@ async function order(req, env) {
     if (recent.c >= 3) return J({ error: "عدد الطلبات كبير، اتصل بنا من فضلك" }, 429);
     const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,total) VALUES(?,?,?,?,?,?,?,?,0,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, o.total).run();
     const row = await env.DB.prepare("SELECT id,code FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // منع التكرار
+    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // طلب متزامن بنفس مفتاح المنع
     id = row.id; o.code = "QST-" + String(id).padStart(4, "0");
     await env.DB.batch([
       env.DB.prepare("UPDATE orders SET code=? WHERE id=?").bind(o.code, id),
       ...items.map(i => env.DB.prepare("INSERT INTO order_items(order_id,item_ref,name,size,qty,base_price,chosen_price,note) VALUES(?,?,?,?,?,?,?,?)").bind(id, i.id, i.name, i.size, i.qty, i.base, i.pend ? -1 : i.unit, i.note || null)),
       env.DB.prepare("INSERT INTO order_events(order_id,event) VALUES(?,'created')").bind(id)]);
-  } catch (e) { o.dbFail = true; o.code = "QST-E" + (Date.now() % 100000); id = null; }
+  } catch (e) {
+    // D1 batch is transactional, but the initial order insert is separate: remove the shell row if details failed.
+    if (id !== null) await env.DB.prepare("DELETE FROM orders WHERE id=?").bind(id).run().catch(() => {});
+    o.dbFail = true; o.code = "QST-E" + (Date.now() % 100000); id = null;
+  }
   await sendOrder(env, id, o, items); // إن فشل الإرسال يعيده Cron كل دقيقة
   return J({ ok: true, code: o.code });
 }
@@ -93,6 +115,8 @@ async function onCommand(m, env) {
   const [cmd, arg] = m.text.trim().split(/\s+/), t = cmd.split("@")[0], uid = m.from.id;
   const rep = s => tg(env, "sendMessage", { chat_id: m.chat.id, text: s, reply_to_message_id: m.message_id });
   if (t === "/myid") return rep(`رقمك: ${uid}`);
+  // يسمح للمالك فقط بمعرفة معرّف مجموعة الاختبار من دون كشفه في السجلات أو المحادثات.
+  if (t === "/chatid" && isOwner(env, uid)) return rep(`معرّف المجموعة: ${m.chat.id}`);
   if (!(await isStaff(env, uid))) return;
   if (t === "/pending") {
     const p = Math.max(1, Number(arg) || 1);
@@ -113,7 +137,25 @@ async function onCommand(m, env) {
 async function hook(req, env) {
   if (!env.WEBHOOK_SECRET || req.headers.get("x-telegram-bot-api-secret-token") !== env.WEBHOOK_SECRET) return new Response("no", { status: 401 });
   const u = await req.json().catch(() => ({}));
-  try { if (u.callback_query) await onButton(u.callback_query, env); else if (u.message?.text?.startsWith("/")) await onCommand(u.message, env); } catch (e) { console.error(e); }
+  const adminChat = String(env.CHAT_ID || "");
+  try {
+    if (u.callback_query) {
+      const actualChat = String(u.callback_query.message?.chat?.id ?? "");
+      if (!adminChat || actualChat !== adminChat) {
+        await tg(env, "answerCallbackQuery", { callback_query_id: u.callback_query.id, text: "المجموعة غير معتمدة", show_alert: true });
+      } else {
+        await onButton(u.callback_query, env);
+      }
+    } else if (u.message?.text?.startsWith("/")) {
+      const m = u.message;
+      const command = m.text.trim().split(/\s+/)[0].split("@")[0];
+      const publicMyIdLookup = command === "/myid";
+      const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
+      if (publicMyIdLookup || ownerChatIdLookup || (adminChat && String(m.chat?.id) === adminChat)) {
+        await onCommand(m, env);
+      }
+    }
+  } catch (e) { console.error(e); }
   return new Response("ok");
 }
 

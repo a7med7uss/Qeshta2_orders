@@ -2,9 +2,27 @@
   "name": "qeshta-order",
   "main": "src/worker.js",
   "compatibility_date": "2026-10-01",
-  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
-  "d1_databases": [{ "binding": "DB", "database_name": "qeshta-orders", "database_id": "6b1778f9-108c-429e-8f24-0afc383ed329" }],
-  "triggers": { "crons": ["* * * * *"] },
-  // أسرار لا تُكتب هنا: BOT_TOKEN و WEBHOOK_SECRET و TURNSTILE_SECRET (من لوحة Cloudflare)
-  "vars": { "CHAT_ID": "-1003519423911", "OWNER_IDS": "6681233049" }
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "qeshta-orders",
+      "database_id": "6b1778f9-108c-429e-8f24-0afc383ed329"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "OWNER_IDS": "6681233049"
+  },
+  "keep_vars": true
 }
