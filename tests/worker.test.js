@@ -4,7 +4,7 @@ const schema = readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8"
 function mkEnv() {
   const db = new DatabaseSync(":memory:"); db.exec(schema);
   const prep = sql => { let a = []; const o = { bind: (...x) => (a = x, o), run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...a).changes) } }), first: async () => db.prepare(sql).get(...a) ?? null, all: async () => ({ results: db.prepare(sql).all(...a) }), _r: () => db.prepare(sql).run(...a) }; return o; };
-  return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec" };
+  return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec", TURNSTILE_SECRET: "turnstile-test-secret" };
 }
 const sent = []; globalThis.fetch = async (u, i) => { const b = i?.body && typeof i.body === "string" ? JSON.parse(i.body) : {}; sent.push({ u: String(u).split("/").pop(), b }); return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) }; };
 const post = (env, path, body, h = {}) => worker.fetch(new Request("https://x" + path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) }), env);
@@ -63,4 +63,43 @@ test("تقييد أوامر الإدارة والأزرار على جروب ال
   await tgHook(env, q);
   assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
   assert.equal(env.db.prepare("SELECT status FROM orders").get(), undefined);
+});
+
+test("رفض الطلب إذا كان Turnstile secret غير مضبوط", async () => {
+  const env = mkEnv(); env.TURNSTILE_SECRET = ""; sent.length = 0;
+  const r = await post(env, "/api/order", ok);
+  assert.equal(r.status, 503);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+  assert.equal(sent.filter(x => x.u === "sendMessage").length, 0);
+});
+
+test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", ok);
+  env.db.prepare("INSERT INTO orders(idem_key,customer_name,phone,payment_method,subtotal,total) VALUES('other-1','اسم تجريبي','01012345678','cash',0,0)").run();
+  env.db.prepare("INSERT INTO orders(idem_key,customer_name,phone,payment_method,subtotal,total) VALUES('other-2','اسم تجريبي','01012345678','cash',0,0)").run();
+  const replay = await (await post(env, "/api/order", ok)).json();
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.code, "QST-0001");
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 3);
+  assert.equal(sent.filter(x => x.u === "sendMessage").length, 1);
+});
+
+test("رفض الإحداثيات الناقصة أو خارج النطاق", async () => {
+  const env = mkEnv();
+  const partial = { ...ok, address: "", lat: 30.1 };
+  const invalid = { ...ok, address: "", lat: 300, lng: 31 };
+  assert.equal((await post(env, "/api/order", { ...partial, idem: "coords-0001" })).status, 400);
+  assert.equal((await post(env, "/api/order", { ...invalid, idem: "coords-0002" })).status, 400);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("تنظيف سجل الطلب إذا فشل حفظ تفاصيله في D1", async () => {
+  const env = mkEnv(); sent.length = 0;
+  env.DB.batch = async () => { throw new Error("simulated detail insert failure"); };
+  const result = await (await post(env, "/api/order", ok)).json();
+  assert.match(result.code, /^QST-E/);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+  const message = sent.find(x => x.u === "sendMessage").b.text;
+  assert.match(message, /لم يُحفظ في القاعدة/);
 });
