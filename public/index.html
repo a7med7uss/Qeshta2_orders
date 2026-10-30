@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>اطلب من مطعم قشطة</title>
+<meta name="description" content="اطلب أونلاين من مطعم قشطة: كريب ورولات وبرجر وفطير، والتوصيل مجاني.">
+<meta property="og:title" content="اطلب من مطعم قشطة 🍗">
+<meta property="og:description" content="اختار أكلك بنفسك وزوّد الحشو زي ما تحب. التوصيل مجاني.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://qeshta-restaurant.vercel.app/Logo.webp">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;800&family=Tajawal:wght@500;700&display=swap">
+<style>
+:root{--or:#FF5A1F;--or-d:#E04810;--gold:#FFD166;--bg:#0A0705;--ink:#E2D7D0;--brown:#382B24;--rose:#B3261E;--ok:#4EFE84}
+*{box-sizing:border-box}
+body{margin:0;background:linear-gradient(rgba(10,7,5,.86),rgba(10,7,5,.94)),url(https://qeshta-restaurant.vercel.app/Background1.webp) center/cover fixed var(--bg);color:var(--ink);font:500 16px Tajawal,Tahoma,sans-serif;padding:env(safe-area-inset-top) 0 calc(90px + env(safe-area-inset-bottom))}
+h1,h2,h3,.btn{font-family:Cairo,Tahoma,sans-serif;font-weight:800}
+header{text-align:center;padding:20px 16px 8px}header img{width:88px;height:88px;border-radius:50%;background:#fff}header h1{margin:6px 0 0;font-size:26px}header p{margin:2px 0;opacity:.8}
+nav{position:sticky;top:0;z-index:5;display:flex;gap:8px;overflow-x:auto;padding:10px 12px;background:rgba(10,7,5,.92)}
+nav button{flex:none;border:1px solid var(--brown);background:transparent;color:var(--ink);padding:8px 16px;border-radius:50px;font:700 15px Cairo,sans-serif}
+nav button.on{background:var(--or);border-color:var(--or);color:#fff}
+main{max-width:640px;margin:0 auto;padding:8px 14px}
+h2{font-size:18px;margin:18px 4px 8px;color:var(--gold)}
+.it{display:flex;justify-content:space-between;align-items:center;width:100%;margin:0 0 8px;padding:14px 16px;border:0;border-radius:20px;background:rgba(255,255,255,.9);color:#0F0A07;font:700 16px Tajawal,sans-serif;text-align:right}
+.it small{color:var(--or-d);font-weight:700}
+.sheet{position:fixed;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.6)}
+.sheet[hidden]{display:none}
+.pane{width:100%;max-width:640px;max-height:92vh;overflow:auto;background:#17100c;border-radius:24px 24px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));border:1px solid var(--brown)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chip{padding:3px 14px;border-radius:50px;font:700 14px Cairo,sans-serif;transition:.15s}
+.price{font:800 40px Cairo,sans-serif;transition:transform .12s}
+.msg{min-height:24px;color:var(--gold);font-size:14px;margin:4px 0}
+.btn{border:0;border-radius:20px;padding:14px 18px;font-size:17px;color:#fff;background:linear-gradient(135deg,var(--or),var(--or-d))}
+.btn.alt{background:var(--brown)}.btn.big{width:100%}
+.step{width:56px;height:56px;border-radius:50%;border:0;background:var(--brown);color:#fff;font:800 22px Cairo,sans-serif}
+input[type=text],input[type=tel],textarea{width:100%;margin:6px 0;padding:12px 14px;border-radius:14px;border:1px solid var(--brown);background:#0F0A07;color:var(--ink);font:500 16px Tajawal,sans-serif}
+.pay{display:flex;gap:8px;margin:8px 0}.pay label{flex:1;text-align:center;padding:10px 4px;border:1px solid var(--brown);border-radius:14px}
+.pay input{display:none}.pay input:checked+span{color:var(--gold);font-weight:700}.pay label:has(input:checked){border-color:var(--or);background:#2a1a10}
+#bar{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:616px;margin:auto;z-index:10;display:flex;justify-content:space-between}
+#bar[hidden]{display:none}
+.line{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--brown)}
+.q button{width:34px;height:34px;border-radius:50%;border:0;background:var(--brown);color:#fff;font-weight:800}
+.err{color:#ff8a80;min-height:22px}.hp{position:absolute;left:-9999px}
+.tot{font:700 17px Cairo,sans-serif;margin:10px 0}.snd{font-size:13px;opacity:.8}
+</style>
+</head>
+<body>
+<header><img src="https://qeshta-restaurant.vercel.app/Logo.webp" alt="مطعم قشطة" width="88" height="88"><h1>مطعم قشطة</h1><p>اطلب أونلاين · التوصيل مجاني 🛵</p><label class="snd"><input type="checkbox" id="snd" checked> الصوت</label></header>
+<nav id="tabs"></nav>
+<main id="list"></main>
+<button id="bar" class="btn" hidden></button>
+<div id="sheet" class="sheet" hidden><div class="pane" id="pane"></div></div>
+<script>(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y)})(window,document,"clarity","script","z0gxnddk3q");</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+<script type="module">
+import { MENU } from "./lib/menu-data.js";
+import { nextStep, indexMenu, ladder } from "./lib/pricing.js";
+const $ = s => document.querySelector(s), IDX = indexMenu(MENU), COL = MENU.ui.size_colors;
+const mains = MENU.categories.filter(c => c.type === "main");
+const catOf = new Map(); MENU.categories.forEach(c => [...c.items, ...(c.additions || [])].forEach(i => catOf.set(i.id, c)));
+let tab = mains[0].id, cart = [], cur = null, idem = null, ts = null, tok = "", loc = null;
+// ---- أصوات واهتزاز (تعمل بعد أول لمسة؛ مع كتم)
+let ctx; const on = () => $("#snd").checked;
+const tone = (f, t, d, g, ty = "sine") => { ctx ??= new (window.AudioContext || window.webkitAudioContext)(); ctx.resume?.(); const o = ctx.createOscillator(), v = ctx.createGain(), s = ctx.currentTime + t; o.type = ty; o.frequency.value = f; v.gain.setValueAtTime(.0001, s); v.gain.exponentialRampToValueAtTime(g, s + .008); v.gain.exponentialRampToValueAtTime(.0001, s + d); o.connect(v); v.connect(ctx.destination); o.start(s); o.stop(s + d + .02); };
+const buzz = p => { try { navigator.vibrate?.(p); } catch {} };
+const C5 = 523.25, E5 = 659.25, G5 = 783.99, C6 = 1046.5;
+const sfx = { tick: n => on() && (tone(C5 * 2 ** (Math.min(n, 8) / 12), 0, .06, .1), buzz(8)), flip: () => on() && (tone(C5, 0, .1, .14), tone(E5, .09, .16, .14), buzz([12, 40, 18])), limit: () => on() && (tone(329.63, 0, .12, .08, "triangle"), buzz(25)), add: () => on() && (tone(C5, 0, .08, .12), tone(G5, .07, .14, .12), buzz(15)), win: () => on() && ([C5, E5, G5].forEach((f, i) => tone(f, i * .09, .14, .12)), tone(C6, .27, .3, .14), tone(C6 * 2, .27, .2, .03), buzz([20, 50, 20, 50, 40])) };
+// ---- المنيو
+const label = it => it.kind === "sized" ? "يبدأ من " + it.segments[0].base : it.kind === "single" ? "يبدأ من " + it.base : it.kind === "fixed" ? it.amount + " ج" : it.kind === "free" ? "مجانًا" : "السعر بالتليفون";
+const sec = (c, title) => `<h2>${title}</h2>` + [...c.items, ...(c.additions || [])].map(i => `<button class="it" data-id="${i.id}"><span>${i.name}</span><small>${label(i)}</small></button>`).join("");
+function renderList() {
+  $("#tabs").innerHTML = mains.map(c => `<button data-tab="${c.id}" class="${c.id === tab ? "on" : ""}">${c.name}</button>`).join("");
+  const c = mains.find(x => x.id === tab);
+  $("#list").innerHTML = sec(c, c.name) + MENU.categories.filter(s => s.parent_category === tab).map(s => sec(s, s.name)).join("");
+}
+const total = () => cart.reduce((s, l) => s + (IDX.get(l.id).kind === "fixed" ? IDX.get(l.id).amount : IDX.get(l.id).kind === "free" || IDX.get(l.id).kind === "unpriced" ? 0 : l.amount) * l.qty, 0);
+function bar() { const n = cart.reduce((s, l) => s + l.qty, 0); $("#bar").hidden = !n; $("#bar").innerHTML = `<span>السلة (${n})</span><span>${total()} ج ←</span>`; }
+const close = () => { $("#sheet").hidden = true; };
+// ---- شاشة الصنف
+function openItem(it) {
+  if (!["sized", "single"].includes(it.kind)) { addLine({ id: it.id, amount: 0, qty: 1, note: "" }); return; }
+  cur = { it, amount: ladder(it)[0].amount, rm: new Set() }; drawItem(); $("#sheet").hidden = false;
+}
+function drawItem(msg = "") {
+  const { it, amount } = cur, L = ladder(it).find(r => r.amount === amount), c = catOf.get(it.id), base = it.kind === "sized" ? it.segments.find(s => s.size === L.size).base : it.base;
+  const chip = L.size ? `<span class="chip" style="background:${COL[L.size].bg};color:${COL[L.size].fg}">${L.size}</span>` : "";
+  $("#pane").innerHTML = `<div class="row"><h3>${it.name}</h3>${chip}</div>
+  <div class="row" style="margin:14px 0"><button class="step" data-d="1">+</button><div style="text-align:center"><span class="price" id="pr">${amount}</span> ج<div class="snd">${amount > base ? "زيادة " + (amount - base) + " ج في الحشو" : "السعر الأساسي"}</div></div><button class="step" data-d="-1">−</button></div>
+  <div class="msg">${msg}</div>
+  ${(c.removable_items || []).length && c.id === "burgers" && it.id.startsWith("b") ? `<div>${c.removable_items.map(x => `<label><input type="checkbox" data-rm="${x}"> بدون ${x}</label>`).join("<br>")}</div>` : ""}
+  <input type="text" id="note" placeholder="ملاحظة (اختياري)" maxlength="100"><button class="btn big" id="add">أضف للسلة</button>`;
+  $("#pr").style.transform = "scale(1.08)"; setTimeout(() => $("#pr") && ($("#pr").style.transform = ""), 120);
+}
+function addLine(l) { const k = l.id + "|" + l.amount + "|" + l.note, f = cart.find(x => x.k === k); f ? f.qty++ : cart.push({ ...l, k }); sfx.add(); bar(); }
+// ---- السلة والدفع
+function openCheckout() {
+  idem ??= crypto.randomUUID(); const m = IDX; 
+  $("#pane").innerHTML = `<h3>طلبك</h3>${cart.map((l, i) => `<div class="line"><span>${m.get(l.id).name}${l.note ? " <small>(" + l.note + ")</small>" : ""}<br><small>${m.get(l.id).kind === "fixed" ? m.get(l.id).amount : l.amount || ""} ${l.amount || m.get(l.id).kind === "fixed" ? "ج" : ""}</small></span><span class="q"><button data-q="${i}:1">+</button> ${l.qty} <button data-q="${i}:-1">−</button></span></div>`).join("")}
+  <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
+  <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
+  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل"></textarea><button class="btn alt big" id="loc">📍 استخدم موقعي</button><div class="msg" id="lm"></div>
+  <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>كاش</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div>
+  <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go">تأكيد الطلب</button>`;
+  $("#sheet").hidden = false;
+  if (window.turnstile) { ts = turnstile.render("#ts", { sitekey: "0x4AAAAAAFcZSjYMCjWyaO2h", callback: t => tok = t, "expired-callback": () => tok = "" }); }
+}
+async function submit() {
+  const g = id => $(id).value.trim(), er = m => $("#er").textContent = m;
+  const body = { idem, name: g("#nm"), phone: g("#ph"), address: g("#ad"), lat: loc?.lat, lng: loc?.lng, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
+  $("#go").disabled = true; er("");
+  try {
+    const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), d = await r.json();
+    if (!r.ok) { er(d.error || "حصل خطأ، حاول تاني"); $("#go").disabled = false; window.turnstile && ts !== null && turnstile.reset(ts); tok = ""; return; }
+    cart = []; idem = null; bar(); sfx.win();
+    $("#pane").innerHTML = `<div style="text-align:center"><div style="font-size:56px">🎉</div><h3>تم استلام طلبك</h3><p class="price" style="color:var(--gold)">${d.code}</p><p>هنتصل بيك على رقمك لتأكيد الطلب.</p><button class="btn big" id="x">تمام</button></div>`;
+  } catch { er("مفيش اتصال، حاول تاني"); $("#go").disabled = false; }
+}
+document.addEventListener("click", e => {
+  const t = e.target.closest("button,.it"); if (!t) return;
+  if (t.dataset.tab) { tab = t.dataset.tab; renderList(); scrollTo(0, 0); }
+  else if (t.classList.contains("it")) openItem(IDX.get(t.dataset.id));
+  else if (t.dataset.d) { const r = nextStep(cur.it, cur.amount, +t.dataset.d); if (r.limit) { sfx.limit(); drawItem(r.message || ""); return; } const n = Math.round((r.amount - (cur.it.base ?? cur.it.segments[0].base)) / 10); cur.amount = r.amount; r.flipped ? sfx.flip() : sfx.tick(n); drawItem(t.dataset.d > 0 ? "حشو أكتر في نفس الصنف" : ""); }
+  else if (t.id === "add") { const rm = [...document.querySelectorAll("[data-rm]:checked")].map(x => x.dataset.rm), note = [rm.length ? "بدون: " + rm.join("، ") : "", $("#note").value.trim()].filter(Boolean).join(" — "); addLine({ id: cur.it.id, amount: cur.amount, qty: 1, note }); close(); }
+  else if (t.id === "bar") openCheckout();
+  else if (t.dataset.q) { const [i, d] = t.dataset.q.split(":").map(Number); cart[i].qty += d; if (cart[i].qty < 1) cart.splice(i, 1); bar(); cart.length ? openCheckout() : close(); }
+  else if (t.id === "loc") navigator.geolocation?.getCurrentPosition(p => { loc = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }; $("#lm").textContent = "تم تحديد موقعك ✓"; }, () => $("#lm").textContent = "تعذر تحديد الموقع، اكتب العنوان");
+  else if (t.id === "go") submit(); else if (t.id === "x") close();
+});
+$("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") close(); });
+renderList();
+</script>
+</body>
+</html>

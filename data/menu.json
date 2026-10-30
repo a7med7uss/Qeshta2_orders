@@ -1,0 +1,1350 @@
+{
+ "restaurant": {
+  "name": "مطعم قشطة",
+  "currency": "EGP",
+  "language": "ar",
+  "text_direction": "rtl"
+ },
+ "rules": {
+  "step": 10,
+  "extra_cap_without_next_tier": 100,
+  "delivery_fee": 0,
+  "size_order": [
+   "عادي",
+   "جامبو",
+   "وردة"
+  ],
+  "notes": "عادي وجامبو سلّم واحد: الاسم يتحول عند أول سعر للجامبو. الوردة سلّم مستقل. غير ذلك: من السعر الأساسي حتى +100."
+ },
+ "ui": {
+  "size_colors": {
+   "عادي": {
+    "bg": "#FF5A1F",
+    "fg": "#FFFFFF"
+   },
+   "جامبو": {
+    "bg": "#FFD166",
+    "fg": "#3A1F10"
+   },
+   "وردة": {
+    "bg": "#B3261E",
+    "fg": "#FFFFFF"
+   }
+  }
+ },
+ "categories": [
+  {
+   "id": "crepes",
+   "name": "الكريب",
+   "type": "main",
+   "sizes": [
+    "عادي",
+    "جامبو",
+    "وردة"
+   ],
+   "items": [
+    {
+     "id": "c01",
+     "name": "كريب شاورما",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 90,
+       "from": 90,
+       "to": 130,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 140,
+       "from": 140,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c02",
+     "name": "كريب فاهيتا",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 120,
+       "from": 120,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c03",
+     "name": "كريب كرسبي",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 75,
+       "from": 75,
+       "to": 95,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 100,
+       "from": 100,
+       "to": 270,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 280,
+       "from": 280,
+       "to": 380,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c04",
+     "name": "كريب زنجر",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 85,
+       "from": 85,
+       "to": 105,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 110,
+       "from": 110,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c05",
+     "name": "كريب استربس",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 70,
+       "from": 70,
+       "to": 90,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 100,
+       "from": 100,
+       "to": 270,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 280,
+       "from": 280,
+       "to": 380,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c06",
+     "name": "كريب بانيه",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 40,
+       "from": 40,
+       "to": 90,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 100,
+       "from": 100,
+       "to": 190,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 200,
+       "from": 200,
+       "to": 300,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c07",
+     "name": "كريب برجر",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 85,
+       "from": 85,
+       "to": 115,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 120,
+       "from": 120,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c08",
+     "name": "برجر فحم",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 95,
+       "from": 95,
+       "to": 135,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 140,
+       "from": 140,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c09",
+     "name": "كريب سجق",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 95,
+       "from": 95,
+       "to": 135,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 140,
+       "from": 140,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c10",
+     "name": "كريب سوسيس",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 100,
+       "from": 100,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c11",
+     "name": "كريب سوبر كرانشي",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 70,
+       "from": 70,
+       "to": 90,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 100,
+       "from": 100,
+       "to": 230,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 240,
+       "from": 240,
+       "to": 340,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c12",
+     "name": "بيف مدخن",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 100,
+       "from": 100,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 370,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 380,
+       "from": 380,
+       "to": 480,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c13",
+     "name": "بيف بيكون",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 100,
+       "from": 100,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 370,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 380,
+       "from": 380,
+       "to": 480,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c14",
+     "name": "بيف زبدة",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 100,
+       "from": 100,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 370,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 380,
+       "from": 380,
+       "to": 480,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c15",
+     "name": "كوردن بلو",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 90,
+       "from": 90,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c16",
+     "name": "لحمة ستيك",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 160,
+       "from": 160,
+       "to": 190,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 195,
+       "from": 195,
+       "to": 385,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 390,
+       "from": 390,
+       "to": 490,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c17",
+     "name": "كريب شيش",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 120,
+       "from": 120,
+       "to": 160,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 170,
+       "from": 170,
+       "to": 370,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 380,
+       "from": 380,
+       "to": 480,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c18",
+     "name": "كريب بطاطس",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 50,
+       "from": 50,
+       "to": 90,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 100,
+       "from": 100,
+       "to": 190,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 200,
+       "from": 200,
+       "to": 300,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c19",
+     "name": "كريب كفتة عادي",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 85,
+       "from": 85,
+       "to": 125,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 135,
+       "from": 135,
+       "to": 295,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "c20",
+     "name": "كفتة فحم",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 95,
+       "from": 95,
+       "to": 135,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 140,
+       "from": 140,
+       "to": 290,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 300,
+       "from": 300,
+       "to": 400,
+       "step": 10
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "crepe_mix",
+   "name": "كريب ميكس",
+   "type": "subcategory",
+   "parent_category": "crepes",
+   "items": [
+    {
+     "id": "cm01",
+     "name": "جبن",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 100,
+       "from": 100,
+       "to": 150,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 160,
+       "from": 160,
+       "to": 190,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 200,
+       "from": 200,
+       "to": 300,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "cm02",
+     "name": "لحوم",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 120,
+       "from": 120,
+       "to": 160,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 170,
+       "from": 170,
+       "to": 330,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 340,
+       "from": 340,
+       "to": 440,
+       "step": 10
+      }
+     ]
+    },
+    {
+     "id": "cm03",
+     "name": "فراخ",
+     "kind": "sized",
+     "segments": [
+      {
+       "size": "عادي",
+       "base": 140,
+       "from": 140,
+       "to": 180,
+       "step": 10
+      },
+      {
+       "size": "جامبو",
+       "base": 185,
+       "from": 185,
+       "to": 365,
+       "step": 10
+      },
+      {
+       "size": "وردة",
+       "base": 370,
+       "from": 370,
+       "to": 470,
+       "step": 10
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "crepe_additions",
+   "name": "إضافات الكريب",
+   "type": "subcategory",
+   "parent_category": "crepes",
+   "items": [
+    {
+     "id": "ca01",
+     "name": "كونة",
+     "kind": "fixed",
+     "amount": 30
+    },
+    {
+     "id": "ca02",
+     "name": "باكيت طاطس عادي",
+     "kind": "single",
+     "base": 20,
+     "from": 20,
+     "to": 120,
+     "step": 10
+    },
+    {
+     "id": "ca03",
+     "name": "باكيت طاطس رومي",
+     "kind": "single",
+     "base": 80,
+     "from": 80,
+     "to": 180,
+     "step": 10
+    },
+    {
+     "id": "ca04",
+     "name": "باكيت طاطس شيدر",
+     "kind": "single",
+     "base": 85,
+     "from": 85,
+     "to": 185,
+     "step": 10
+    },
+    {
+     "id": "ca05",
+     "name": "باكيت طاطس موتزاريلا",
+     "kind": "single",
+     "base": 70,
+     "from": 70,
+     "to": 170,
+     "step": 10
+    },
+    {
+     "id": "ca06",
+     "name": "باكيت بطاطس ميكسات استربس",
+     "kind": "single",
+     "base": 95,
+     "from": 95,
+     "to": 195,
+     "step": 10
+    },
+    {
+     "id": "ca07",
+     "name": "باكيت بطاطس ميكسات كفتة",
+     "kind": "single",
+     "base": 85,
+     "from": 85,
+     "to": 185,
+     "step": 10
+    },
+    {
+     "id": "ca08",
+     "name": "باكيت بطاطس ميكسات سوسيس",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "ca09",
+     "name": "باكيت بطاطس ميكسات شيش",
+     "kind": "single",
+     "base": 150,
+     "from": 150,
+     "to": 250,
+     "step": 10
+    },
+    {
+     "id": "ca10",
+     "name": "باكيت بطاطس ميكسات كوردن بلو",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "ca11",
+     "name": "باكيت بطاطس ميكسات أصناف أخرى",
+     "kind": "unpriced",
+     "needs_phone_confirmation": true
+    }
+   ]
+  },
+  {
+   "id": "crepe_free_options",
+   "name": "إضافات مجانية واختيارات",
+   "type": "subcategory",
+   "parent_category": "crepes",
+   "items": [
+    {
+     "id": "cf01",
+     "name": "صوص تيكسس",
+     "kind": "free"
+    },
+    {
+     "id": "cf02",
+     "name": "صوص رانش",
+     "kind": "free"
+    },
+    {
+     "id": "cf03",
+     "name": "صوص باربيكيو",
+     "kind": "free"
+    },
+    {
+     "id": "cf04",
+     "name": "صوص شيدر",
+     "kind": "free"
+    },
+    {
+     "id": "cf05",
+     "name": "كاتشب زيادة",
+     "kind": "free"
+    },
+    {
+     "id": "cf06",
+     "name": "مايونيز زيادة",
+     "kind": "free"
+    },
+    {
+     "id": "cf07",
+     "name": "شطة زيادة",
+     "kind": "free"
+    },
+    {
+     "id": "cf08",
+     "name": "نوع إسبايسي للكريب",
+     "kind": "free"
+    },
+    {
+     "id": "cf09",
+     "name": "طبق عيش توست",
+     "kind": "single",
+     "base": 20,
+     "from": 20,
+     "to": 120,
+     "step": 10
+    },
+    {
+     "id": "cf10",
+     "name": "المشروبات الغازية جميع الأنواع",
+     "kind": "fixed",
+     "amount": 25
+    }
+   ]
+  },
+  {
+   "id": "rolls",
+   "name": "الرولات",
+   "type": "main",
+   "items": [
+    {
+     "id": "r01",
+     "name": "شاورما",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "r02",
+     "name": "فاهيتا",
+     "kind": "single",
+     "base": 130,
+     "from": 130,
+     "to": 230,
+     "step": 10
+    },
+    {
+     "id": "r03",
+     "name": "كرسبي",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "r04",
+     "name": "زنجر",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "r05",
+     "name": "بانيه",
+     "kind": "single",
+     "base": 80,
+     "from": 80,
+     "to": 180,
+     "step": 10
+    },
+    {
+     "id": "r06",
+     "name": "برجر",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "r07",
+     "name": "برجر فحم",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    },
+    {
+     "id": "r08",
+     "name": "سجق",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    },
+    {
+     "id": "r09",
+     "name": "سوسيس",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "r10",
+     "name": "سوبر كرانشي",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "r11",
+     "name": "بيف مدخن",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "r12",
+     "name": "بيف بيكون",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "r13",
+     "name": "بيف زبدة",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "r14",
+     "name": "كوردن بلو",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    },
+    {
+     "id": "r15",
+     "name": "لحمة ستيك",
+     "kind": "single",
+     "base": 160,
+     "from": 160,
+     "to": 260,
+     "step": 10
+    },
+    {
+     "id": "r16",
+     "name": "شيش",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "r17",
+     "name": "بطاطس",
+     "kind": "single",
+     "base": 80,
+     "from": 80,
+     "to": 180,
+     "step": 10
+    },
+    {
+     "id": "r18",
+     "name": "كفتة عادي",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "r19",
+     "name": "كفتة فحم",
+     "kind": "single",
+     "base": 130,
+     "from": 130,
+     "to": 230,
+     "step": 10
+    }
+   ]
+  },
+  {
+   "id": "roll_mix",
+   "name": "رول ميكس",
+   "type": "subcategory",
+   "parent_category": "rolls",
+   "items": [
+    {
+     "id": "rm01",
+     "name": "ميكس جبن",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    },
+    {
+     "id": "rm02",
+     "name": "ميكس لحوم",
+     "kind": "single",
+     "base": 160,
+     "from": 160,
+     "to": 260,
+     "step": 10
+    },
+    {
+     "id": "rm03",
+     "name": "ميكس فراخ",
+     "kind": "single",
+     "base": 170,
+     "from": 170,
+     "to": 270,
+     "step": 10
+    }
+   ]
+  },
+  {
+   "id": "burgers",
+   "name": "البرجر",
+   "type": "main",
+   "additions": [
+    {
+     "id": "ba01",
+     "name": "إضافة جبن",
+     "kind": "single",
+     "base": 40,
+     "from": 40,
+     "to": 140,
+     "step": 10
+    }
+   ],
+   "removable_items": [
+    "الخس الكابوتشا",
+    "حلقات البصل",
+    "الطماطم"
+   ],
+   "items": [
+    {
+     "id": "b01",
+     "name": "عادي",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "b02",
+     "name": "دبل",
+     "kind": "single",
+     "base": 160,
+     "from": 160,
+     "to": 260,
+     "step": 10
+    },
+    {
+     "id": "b03",
+     "name": "زنجر",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "b04",
+     "name": "سجق",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "b05",
+     "name": "شيش",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "b06",
+     "name": "كفتة فحم",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    }
+   ]
+  },
+  {
+   "id": "crepe_feteer",
+   "name": "كريب فطير",
+   "type": "main",
+   "items": [
+    {
+     "id": "f01",
+     "name": "شاورما",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f02",
+     "name": "فاهيتا",
+     "kind": "single",
+     "base": 160,
+     "from": 160,
+     "to": 260,
+     "step": 10
+    },
+    {
+     "id": "f03",
+     "name": "كرسبي",
+     "kind": "single",
+     "base": 110,
+     "from": 110,
+     "to": 210,
+     "step": 10
+    },
+    {
+     "id": "f04",
+     "name": "زنجر",
+     "kind": "single",
+     "base": 120,
+     "from": 120,
+     "to": 220,
+     "step": 10
+    },
+    {
+     "id": "f05",
+     "name": "بانيه",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "f06",
+     "name": "برجر فحم",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f07",
+     "name": "سجق",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f08",
+     "name": "سوسيس",
+     "kind": "single",
+     "base": 160,
+     "from": 160,
+     "to": 260,
+     "step": 10
+    },
+    {
+     "id": "f09",
+     "name": "سوبر كرانشي",
+     "kind": "single",
+     "base": 100,
+     "from": 100,
+     "to": 200,
+     "step": 10
+    },
+    {
+     "id": "f10",
+     "name": "بيف مدخن",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f11",
+     "name": "بيف بيكون",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f12",
+     "name": "بيف زبدة",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f13",
+     "name": "كوردن بلو",
+     "kind": "single",
+     "base": 130,
+     "from": 130,
+     "to": 230,
+     "step": 10
+    },
+    {
+     "id": "f14",
+     "name": "لحمة ستيك",
+     "kind": "single",
+     "base": 170,
+     "from": 170,
+     "to": 270,
+     "step": 10
+    },
+    {
+     "id": "f15",
+     "name": "شيش",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    },
+    {
+     "id": "f16",
+     "name": "بطاطس",
+     "kind": "single",
+     "base": 80,
+     "from": 80,
+     "to": 180,
+     "step": 10
+    },
+    {
+     "id": "f17",
+     "name": "كفتة فحم",
+     "kind": "single",
+     "base": 140,
+     "from": 140,
+     "to": 240,
+     "step": 10
+    }
+   ]
+  },
+  {
+   "id": "feteer_mix",
+   "name": "فطير ميكس",
+   "type": "subcategory",
+   "parent_category": "crepe_feteer",
+   "items": [
+    {
+     "id": "fm01",
+     "name": "ميكس جبن",
+     "kind": "single",
+     "base": 170,
+     "from": 170,
+     "to": 270,
+     "step": 10
+    },
+    {
+     "id": "fm02",
+     "name": "ميكس لحوم",
+     "kind": "single",
+     "base": 170,
+     "from": 170,
+     "to": 270,
+     "step": 10
+    },
+    {
+     "id": "fm03",
+     "name": "ميكس فراخ",
+     "kind": "single",
+     "base": 180,
+     "from": 180,
+     "to": 280,
+     "step": 10
+    }
+   ]
+  }
+ ]
+}
