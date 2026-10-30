@@ -93,6 +93,8 @@ async function onCommand(m, env) {
   const [cmd, arg] = m.text.trim().split(/\s+/), t = cmd.split("@")[0], uid = m.from.id;
   const rep = s => tg(env, "sendMessage", { chat_id: m.chat.id, text: s, reply_to_message_id: m.message_id });
   if (t === "/myid") return rep(`رقمك: ${uid}`);
+  // يسمح للمالك فقط بمعرفة معرّف مجموعة الاختبار من دون كشفه في السجلات أو المحادثات.
+  if (t === "/chatid" && isOwner(env, uid)) return rep(`معرّف المجموعة: ${m.chat.id}`);
   if (!(await isStaff(env, uid))) return;
   if (t === "/pending") {
     const p = Math.max(1, Number(arg) || 1);
@@ -113,7 +115,24 @@ async function onCommand(m, env) {
 async function hook(req, env) {
   if (!env.WEBHOOK_SECRET || req.headers.get("x-telegram-bot-api-secret-token") !== env.WEBHOOK_SECRET) return new Response("no", { status: 401 });
   const u = await req.json().catch(() => ({}));
-  try { if (u.callback_query) await onButton(u.callback_query, env); else if (u.message?.text?.startsWith("/")) await onCommand(u.message, env); } catch (e) { console.error(e); }
+  const adminChat = String(env.CHAT_ID || "");
+  try {
+    if (u.callback_query) {
+      const actualChat = String(u.callback_query.message?.chat?.id ?? "");
+      if (!adminChat || actualChat !== adminChat) {
+        await tg(env, "answerCallbackQuery", { callback_query_id: u.callback_query.id, text: "المجموعة غير معتمدة", show_alert: true });
+      } else {
+        await onButton(u.callback_query, env);
+      }
+    } else if (u.message?.text?.startsWith("/")) {
+      const m = u.message;
+      const command = m.text.trim().split(/\\s+/)[0].split("@")[0];
+      const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
+      if (ownerChatIdLookup || (adminChat && String(m.chat?.id) === adminChat)) {
+        await onCommand(m, env);
+      }
+    }
+  } catch (e) { console.error(e); }
   return new Response("ok");
 }
 
