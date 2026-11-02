@@ -142,6 +142,10 @@ test("أزرار الطلب تشمل نسخ الهاتف وواتساب وخرا
   assert.ok(flat.some(x => x.text === "📍 Google Maps" && x.url.includes("30.1%2C31.2")));
   assert.ok(flat.some(x => x.text === "🍎 Apple Maps" && x.url.startsWith("https://maps.apple.com/")));
   assert.ok(flat.some(x => x.copy_text?.text === "01000000000"));
+  const waButton = flat.find(x => x.text === "💬 واتساب");
+  const waText = new URL(waButton.url).searchParams.get("text");
+  assert.ok(waText.includes("Vodafone Cash — 01000000000 — باسم Test Wallet Owner"));
+  assert.ok(waText.includes("الإجمالي: 170 جنيه."));
 });
 
 test("إلغاء الطلب يعرض الأسباب ويحفظ السبب المختار في D1", async () => {
