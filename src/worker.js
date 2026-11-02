@@ -118,6 +118,7 @@ function text(o, items, env = {}) {
     `الإجمالي: ${o.total} جنيه`,
     `طريقة الدفع: ${PAY[o.pay]}`,
     ...(o.pay === "wallet" && env.WALLET_NUMBER ? [`المحفظة: ${env.WALLET_PROVIDER || "محفظة"} — ${env.WALLET_NUMBER}`] : []),
+    ...(o.pay === "wallet" && !env.WALLET_NUMBER ? ["⚠️ رقم المحفظة غير مضبوط في إعدادات Worker؛ لا تحوّل قبل تأكيد المطعم."] : []),
     ...(o.pay === "instapay" && !env.INSTAPAY_IPA && !env.INSTAPAY_PAYMENT_LINK ? ["⚠️ بيانات InstaPay غير مضبوطة بعد؛ راجع العميل قبل التحويل."] : []),
     ...(pending.length ? [`⚠️ سعر يتحدد بالتليفون: ${pending.join("، ")}`] : []),
     ...(o.dbFail ? ["⚠️ لم يُحفظ في القاعدة: سجّله يدوياً"] : []),
