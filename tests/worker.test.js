@@ -4,7 +4,7 @@ const schema = readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8"
 function mkEnv() {
   const db = new DatabaseSync(":memory:"); db.exec(schema);
   const prep = sql => { let a = []; const o = { bind: (...x) => (a = x, o), run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...a).changes) } }), first: async () => db.prepare(sql).get(...a) ?? null, all: async () => ({ results: db.prepare(sql).all(...a) }), _r: () => db.prepare(sql).run(...a) }; return o; };
-  return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec", TURNSTILE_SECRET: "turnstile-test-secret" };
+  return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec", TURNSTILE_SECRET: "turnstile-test-secret", WALLET_PROVIDER: "Vodafone Cash", WALLET_NUMBER: "01000000000", WALLET_OWNER: "Test Wallet Owner" };
 }
 const sent = []; globalThis.fetch = async (u, i) => { const b = i?.body && typeof i.body === "string" ? JSON.parse(i.body) : {}; sent.push({ u: String(u).split("/").pop(), b }); return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) }; };
 const post = (env, path, body, h = {}) => worker.fetch(new Request("https://x" + path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) }), env);
@@ -15,7 +15,7 @@ const press = (uid, to, id = 1) => ({ callback_query: { id: "q", data: `s:${id}:
 test("طلب صحيح: يُحفظ ويُرسل بالصيغة المعتمدة", async () => {
   const env = mkEnv(); sent.length = 0; const r = await post(env, "/api/order", ok), d = await r.json();
   assert.equal(d.code, "QST-0001"); const m = sent.find(x => x.u === "sendMessage").b.text;
-  for (const s of ["🔔 طلب جديد #QST-0001", "👤 أحمد محمد – 01012345678", "الأساس 90 + زيادة 30", "الأكل 170 + التوصيل مجاني = الإجمالي 170 ج", "💳 الدفع: كاش"]) assert.ok(m.includes(s), s);
+  for (const s of ["🔔 طلب جديد #QST-0001", "👤 بيانات العميل", "الاسم: أحمد محمد", "الهاتف: 01012345678", "الكريب / كريب شاورما", "الأساس 90 + زيادة 30", "قيمة الأكل: 170 جنيه", "الإجمالي: 170 جنيه", "طريقة الدفع: كاش"]) assert.ok(m.includes(s), s);
   assert.equal(env.db.prepare("SELECT tg_sent FROM orders").get().tg_sent, 1);
 });
 test("منع التكرار: نفس المفتاح لا ينشئ طلباً ثانياً", async () => {
@@ -114,4 +114,93 @@ test("رفض الطلب إذا كانت إعدادات تشغيل البوت أ�
     assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0, key);
     assert.equal(sent.filter(x => x.u === "sendMessage").length, 0, key);
   }
+});
+
+
+test("تمييز الكريب العادي والوردة وإظهار القسم لكل صنف", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const body = { ...ok, idem: "crepe-sizes-0001", lines: [
+    { id: "c04", amount: 85, qty: 1, note: "" },
+    { id: "c04", amount: 300, qty: 1, note: "" },
+    { id: "b03", amount: 100, qty: 1, note: "" }
+  ] };
+  await post(env, "/api/order", body);
+  const message = sent.find(x => x.u === "sendMessage").b.text;
+  assert.ok(message.includes("الكريب / كريب زنجر — عادي × 1"));
+  assert.ok(message.includes("الكريب / كريب زنجر — وردة × 1"));
+  assert.ok(message.includes("البرجر / زنجر"));
+});
+
+test("أزرار الطلب تشمل نسخ الهاتف وواتساب وخرائط Google وApple ونسخ المحفظة", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const body = { ...ok, idem: "buttons-check-0001", pay: "wallet", lat: 30.1, lng: 31.2 };
+  await post(env, "/api/order", body);
+  const keyboard = sent.find(x => x.u === "sendMessage").b.reply_markup.inline_keyboard;
+  const flat = keyboard.flat();
+  assert.ok(flat.some(x => x.copy_text?.text === "01012345678"));
+  assert.ok(flat.some(x => x.text === "💬 واتساب" && x.url.startsWith("https://wa.me/")));
+  assert.ok(flat.some(x => x.text === "📍 Google Maps" && x.url.includes("30.1%2C31.2")));
+  assert.ok(flat.some(x => x.text === "🍎 Apple Maps" && x.url.startsWith("https://maps.apple.com/")));
+  assert.ok(flat.some(x => x.copy_text?.text === "01000000000"));
+});
+
+test("إلغاء الطلب يعرض الأسباب ويحفظ السبب المختار في D1", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", ok);
+  const open = press(6681233049, "cancelled");
+  open.callback_query.data = "c:1:open";
+  await tgHook(env, open);
+  const reasonKeyboard = sent.find(x => x.u === "editMessageReplyMarkup").b.reply_markup.inline_keyboard.flat();
+  assert.ok(reasonKeyboard.some(x => x.callback_data === "c:1:no_answer"));
+
+  sent.length = 0;
+  const choose = press(6681233049, "cancelled");
+  choose.callback_query.data = "c:1:no_answer";
+  await tgHook(env, choose);
+  const row = env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get();
+  assert.equal(row.status, "cancelled");
+  assert.equal(row.cancel_reason, "العميل لا يرد");
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='cancelled'").get().c, 1);
+  assert.ok(sent.some(x => x.u === "editMessageText"));
+});
+
+test("سبب إلغاء مخصص يُطلب بالرد ويحفظ في الطلب", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", ok);
+  sent.length = 0;
+  const q = press(6681233049, "cancelled");
+  q.callback_query.data = "c:1:other";
+  await tgHook(env, q);
+  const prompt = sent.find(x => x.u === "sendMessage");
+  assert.ok(prompt.b.reply_markup.force_reply);
+  assert.match(prompt.b.text, /QST-0001/);
+
+  await tgHook(env, { message: {
+    text: "العميل طلب التأجيل ليوم آخر",
+    from: { id: 6681233049, first_name: "أحمد" },
+    chat: { id: -100 },
+    message_id: 99,
+    reply_to_message: { text: prompt.b.text, from: { id: 123, is_bot: true } }
+  } });
+  const row = env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get();
+  assert.equal(row.status, "cancelled");
+  assert.equal(row.cancel_reason, "العميل طلب التأجيل ليوم آخر");
+});
+
+test("فشل معالجة callback يرسل تنبيهاً بدلاً من ترك زر Telegram معلقاً", async () => {
+  const env = mkEnv(); sent.length = 0;
+  env.DB.prepare = () => { throw new Error("simulated D1 error"); };
+  await tgHook(env, press(6681233049, "confirmed"));
+  assert.ok(sent.some(x => x.u === "answerCallbackQuery" && x.b.text.includes("تعذر تنفيذ الإجراء")));
+});
+
+test("طلب InstaPay لا يعرض رقمًا أو رابطًا مختلقًا إذا لم يتم ضبط الحساب", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const body = { ...ok, idem: "no-ipa-data-0001", pay: "instapay" };
+  await post(env, "/api/order", body);
+  const sentMessage = sent.find(x => x.u === "sendMessage");
+  assert.ok(sentMessage.b.text.includes("بيانات InstaPay غير مضبوطة"));
+  const buttons = sentMessage.b.reply_markup.inline_keyboard.flat();
+  assert.equal(buttons.some(x => x.text?.includes("InstaPay IPA")), false);
+  assert.equal(buttons.some(x => x.text?.includes("رابط InstaPay")), false);
 });
