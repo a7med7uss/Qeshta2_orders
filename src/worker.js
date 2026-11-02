@@ -157,6 +157,7 @@ async function order(req, env) {
   if (name.split(" ").length < 2 || name.length > 60) return J({ error: "اكتب الاسم الثنائي" }, 400);
   if (!/^01[0125]\d{8}$/.test(phone)) return J({ error: "رقم الموبايل غير صحيح" }, 400);
   if ((b.lat != null || b.lng != null) && !hasCoordinates) return J({ error: "الموقع الجغرافي غير صالح" }, 400);
+  if (!hasCoordinates) return J({ error: "حدد موقعك الدقيق من زر تحديد الموقع قبل تأكيد الطلب" }, 400);
   if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
@@ -238,8 +239,7 @@ async function onButton(q, env) {
     const [kind, sid, action] = String(q.data || "").split(":");
     const id = Number(sid), uid = q.from?.id;
     if (!Number.isSafeInteger(id) || id < 1) return ans("رقم الطلب غير صالح", true);
-    if (!(await isStaff(env, uid))) return ans("مش مسموح لك", true);
-
+    // Any member who can interact with this message in the configured kitchen group may manage this order.
     const row = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(id).first();
     if (!row) return ans("الطلب غير موجود", true);
 
@@ -302,7 +302,6 @@ async function onCancelReasonReply(m, env) {
   const prompt = String(m.reply_to_message?.text || "");
   const match = prompt.match(/^اكتب سبب إلغاء الطلب #([A-Z0-9-]+)/);
   if (!match) return false;
-  if (!(await isStaff(env, m.from?.id))) return true;
   const reason = String(m.text || "").trim().slice(0, 200);
   if (reason.length < 3) {
     await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: "اكتب سبباً أوضح (3 أحرف على الأقل).", reply_to_message_id: m.message_id });
@@ -352,6 +351,7 @@ async function hook(req, env) {
   try {
     if (u.callback_query) {
       const actualChat = String(u.callback_query.message?.chat?.id ?? "");
+      console.info("Telegram order callback received", { chatId: actualChat, userId: u.callback_query.from?.id, action: String(u.callback_query.data || "").split(":")[2] || "unknown" });
       if (!adminChat || actualChat !== adminChat) {
         await tg(env, "answerCallbackQuery", { callback_query_id: u.callback_query.id, text: "المجموعة غير معتمدة", show_alert: true });
       } else {
