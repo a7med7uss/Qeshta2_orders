@@ -25,7 +25,7 @@ function itemCategory(itemId) {
   return parent ? `${parent.name} › ${c.name}` : c.name;
 }
 function whatsappPhone(phone) {
-  const digits = String(phone || "").replace(/\\D/g, "");
+  const digits = String(phone || "").replace(/\D/g, "");
   if (digits.startsWith("0")) return "20" + digits.slice(1);
   if (digits.startsWith("20")) return digits;
   return digits;
@@ -62,7 +62,7 @@ function orderKeyboard(o, status, items, env) {
   if (actions.length) rows.push(actions);
   if (next.includes("cancelled")) rows.push([{ text: "❌ إلغاء", callback_data: `c:${o.id}:open` }]);
 
-  const phone = String(o.phone || "").replace(/[\\s-]/g, "");
+  const phone = String(o.phone || "").replace(/[\s-]/g, "");
   const contactRow = [];
   if (phone) contactRow.push({ text: "📋 نسخ رقم العميل", copy_text: { text: phone.slice(0, 256) } });
   const wa = whatsappUrl(phone, orderWhatsAppMessage(o, items, env));
@@ -83,7 +83,7 @@ function orderKeyboard(o, status, items, env) {
   } else if (o.pay === "instapay") {
     const payment = [];
     if (env.INSTAPAY_IPA) payment.push({ text: "📋 نسخ InstaPay IPA", copy_text: { text: String(env.INSTAPAY_IPA).slice(0, 256) } });
-    if (env.INSTAPAY_PAYMENT_LINK && /^https:\\/\\//i.test(env.INSTAPAY_PAYMENT_LINK)) payment.push({ text: "فتح رابط InstaPay", url: env.INSTAPAY_PAYMENT_LINK });
+    if (env.INSTAPAY_PAYMENT_LINK && /^https:\/\//i.test(env.INSTAPAY_PAYMENT_LINK)) payment.push({ text: "فتح رابط InstaPay", url: env.INSTAPAY_PAYMENT_LINK });
     if (payment.length) rows.push(payment);
   }
   return { inline_keyboard: rows };
@@ -360,7 +360,7 @@ async function hook(req, env) {
       const m = u.message;
       const actualChat = String(m.chat?.id ?? "");
       if (m.text?.startsWith("/")) {
-        const command = m.text.trim().split(/\\s+/)[0].split("@")[0];
+        const command = m.text.trim().split(/\s+/)[0].split("@")[0];
         const publicMyIdLookup = command === "/myid";
         const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
         if (publicMyIdLookup || ownerChatIdLookup || (adminChat && actualChat === adminChat)) await onCommand(m, env);
