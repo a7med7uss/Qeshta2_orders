@@ -100,7 +100,7 @@ function openCheckout() {
   <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
   <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
   <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل"></textarea><button class="btn alt big" id="loc" type="button">📍 حدد موقعي بدقة</button><div class="msg" id="lm" role="status">الموقع الدقيق لم يُحدد بعد. اضغط الزر واسمح للمتصفح بالوصول للموقع.</div>
-  <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>كاش</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div>
+  <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>الدفع عند الاستلام</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div><div class="msg" id="paymsg" role="status" aria-live="polite"></div>
   <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go">تأكيد الطلب</button>`;
   $("#sheet").hidden = false;
   if (window.turnstile) { ts = turnstile.render("#ts", { sitekey: "0x4AAAAAAFcZSjYMCjWyaO2h", callback: t => tok = t, "expired-callback": () => tok = "" }); }
@@ -117,6 +117,18 @@ async function submit() {
     $("#pane").innerHTML = `<div style="text-align:center"><div style="font-size:56px">🎉</div><h3>تم استلام طلبك</h3><p class="price" style="color:var(--gold)">${d.code}</p><p>هنتصل بيك على رقمك لتأكيد الطلب.</p><button class="btn big" id="x">تمام</button></div>`;
   } catch { er("مفيش اتصال، حاول تاني"); $("#go").disabled = false; }
 }
+document.addEventListener("change", e => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || input.name !== "pay") return;
+  const notice = $("#paymsg");
+  if (input.value === "instapay") {
+    const cash = document.querySelector('input[name="pay"][value="cash"]');
+    if (cash) cash.checked = true;
+    if (notice) notice.textContent = "لم يتم إتاحة InstaPay حالياً. اختار الدفع عند الاستلام أو فودافون كاش.";
+    return;
+  }
+  if (notice) notice.textContent = "";
+});
 document.addEventListener("click", e => {
   const t = e.target.closest("button,.it"); if (!t) return;
   if (t.dataset.tab) { tab = t.dataset.tab; renderList(); scrollTo(0, 0); }

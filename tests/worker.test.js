@@ -15,7 +15,7 @@ const press = (uid, to, id = 1) => ({ callback_query: { id: "q", data: `s:${id}:
 test("طلب صحيح: يُحفظ ويُرسل بالصيغة المعتمدة", async () => {
   const env = mkEnv(); sent.length = 0; const r = await post(env, "/api/order", ok), d = await r.json();
   assert.equal(d.code, "QST-0001"); const m = sent.find(x => x.u === "sendMessage").b.text;
-  for (const s of ["🔔 طلب جديد #QST-0001", "👤 بيانات العميل", "الاسم: أحمد محمد", "الهاتف: 01012345678", "الكريب / كريب شاورما", "الأساس 90 + زيادة 30", "قيمة الأكل: 170 جنيه", "الإجمالي: 170 جنيه", "طريقة الدفع: كاش"]) assert.ok(m.includes(s), s);
+  for (const s of ["🔔 طلب جديد #QST-0001", "👤 بيانات العميل", "الاسم: أحمد محمد", "الهاتف: 01012345678", "الكريب / كريب شاورما", "الأساس 90 + زيادة 30", "قيمة الأكل: 170 جنيه", "الإجمالي: 170 جنيه", "طريقة الدفع: الدفع عند الاستلام"]) assert.ok(m.includes(s), s);
   assert.equal(env.db.prepare("SELECT tg_sent FROM orders").get().tg_sent, 1);
 });
 test("منع التكرار: نفس المفتاح لا ينشئ طلباً ثانياً", async () => {
@@ -28,46 +28,64 @@ test("رفض: تليفون غلط، سعر معدّل، اسم أحادي، سل
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
 });
 test("الحقل المخفي: لا طلب ولا رسالة", async () => { const env = mkEnv(); sent.length = 0; await post(env, "/api/order", { ...ok, hp: "x" }); assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0); assert.equal(sent.length, 0); });
-test("أزرار الطلب تعمل لأي عضو داخل جروب المطبخ فقط", async () => {
+test("أي عضو في جروب المطبخ يؤكد بعد موافقة صريحة، وخارج الجروب يُرفض", async () => {
   const env = mkEnv();
-  const locatedOrder = { ...ok, lat: 30.1, lng: 31.2 };
-  await post(env, "/api/order", locatedOrder);
+  await post(env, "/api/order", { ...ok, lat: 30.1, lng: 31.2 });
   sent.length = 0;
-  assert.equal((await tgHook(env, press(1, "confirmed"), "bad")).status, 401);
 
-  // A normal kitchen-group member (not OWNER_IDS and not in staff) can confirm.
-  await tgHook(env, press(999, "confirmed"));
-  assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().status, "confirmed");
-  assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().confirmed_by, 999);
-  assert.ok(sent.some(x => x.u === "answerCallbackQuery" && x.b.text === "تم التأكيد"));
+  const badSecret = await tgHook(env, press(999, "confirmed"), "bad");
+  assert.equal(badSecret.status, 401);
 
-  // The same member can cancel from the configured kitchen group.
-  const cancel = press(999, "cancelled");
-  cancel.callback_query.data = "c:1:no_answer";
-  await tgHook(env, cancel);
-  const row = env.db.prepare("SELECT status,cancel_reason FROM orders").get();
-  assert.equal(row.status, "cancelled");
-  assert.equal(row.cancel_reason, "العميل لا يرد");
+  // Any group member can request confirmation, but the DB is unchanged until Yes.
+  const ask = press(999, "confirmed");
+  await tgHook(env, ask);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+  const prompt = sent.find(x => x.u === "editMessageText");
+  assert.ok(prompt.b.text.includes("هل أنت متأكد من تأكيد الطلب؟"));
+  const promptButtons = prompt.b.reply_markup.inline_keyboard.flat();
+  assert.ok(promptButtons.some(x => x.callback_data === "yes:1:confirmed"));
+  assert.ok(promptButtons.some(x => x.callback_data === "no:1:confirmed"));
 
-  // Callback queries from a different chat are still rejected by hook().
+  // Canceling the prompt restores the original order without changing status.
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-no", data: "no:1:confirmed" } });
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+  const restored = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:cancelled"));
+
+  // The same ordinary member confirms the order.
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:confirmed" } });
+  const row = env.db.prepare("SELECT status,confirmed_by FROM orders WHERE id=1").get();
+  assert.equal(row.status, "confirmed");
+  assert.equal(row.confirmed_by, 999);
+  const finalMessage = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.ok(finalMessage.b.text.includes("الحالة: تم التأكيد"));
+  assert.deepEqual(finalMessage.b.reply_markup.inline_keyboard, []);
+
+  // Callback queries from another chat remain rejected.
   sent.length = 0;
   const outsider = press(999, "confirmed");
   outsider.callback_query.message.chat.id = -200;
   await tgHook(env, outsider);
   assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
 });
-test("أوامر إدارة الموظفين تظل للمالك، لكن أزرار الطلب لكل أعضاء الجروب", async () => {
+test("أوامر إدارة الموظفين للمالك فقط، وأزرار الطلب لأي عضو حتى بعد حذفه من staff", async () => {
   const env = mkEnv(); await post(env, "/api/order", ok);
   const add = (uid) => ({ message: { text: "/addstaff", from: { id: uid }, chat: { id: -100 }, message_id: 1, reply_to_message: { from: { id: 555, first_name: "علي", is_bot: false } } } });
-  await tgHook(env, add(999)); assert.equal(env.db.prepare("SELECT COUNT(*) c FROM staff").get().c, 0);
-  await tgHook(env, add(6681233049)); await tgHook(env, press(555, "confirmed"));
-  assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "confirmed");
+  await tgHook(env, add(999));
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM staff").get().c, 0);
+  await tgHook(env, add(6681233049));
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM staff").get().c, 1);
+
   await tgHook(env, { message: { text: "/removestaff 555", from: { id: 6681233049 }, chat: { id: -100 }, message_id: 2 } });
   sent.length = 0;
   await tgHook(env, { message: { text: "/pending", from: { id: 555 }, chat: { id: -100 }, message_id: 3 } });
-  assert.equal(sent.filter(x => x.u === "sendMessage").length, 0, "أوامر الإدارة تظل محمية بعد حذف الموظف");
-  await tgHook(env, press(555, "out_for_delivery"));
-  assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "out_for_delivery", "عضو الجروب يظل قادراً على إدارة الطلب");
+  assert.equal(sent.filter(x => x.u === "sendMessage").length, 0, "admin commands stay restricted");
+
+  const q = press(555, "confirmed");
+  await tgHook(env, q);
+  await tgHook(env, { callback_query: { ...q.callback_query, id: "q-yes", data: "yes:1:confirmed" } });
+  assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().status, "confirmed");
+  assert.equal(env.db.prepare("SELECT confirmed_by FROM orders").get().confirmed_by, 555);
 });
 
 test("تقييد أوامر الإدارة والأزرار على جروب الإدارة مع إتاحة /chatid للمالك", async () => {
@@ -171,64 +189,89 @@ test("تمييز الكريب العادي والوردة وإظهار القس�
   assert.ok(message.includes("البرجر / زنجر"));
 });
 
-test("أزرار الطلب تشمل نسخ الهاتف وواتساب وخرائط Google وApple ونسخ المحفظة", async () => {
+test("أزرار الطلب تشمل إرسال WhatsApp والخرائط، ولا تعرض المحفظة في جروب المطبخ", async () => {
   const env = mkEnv(); sent.length = 0;
   const body = { ...ok, idem: "buttons-check-0001", pay: "wallet", lat: 30.1, lng: 31.2 };
   await post(env, "/api/order", body);
-  const keyboard = sent.find(x => x.u === "sendMessage").b.reply_markup.inline_keyboard;
-  const flat = keyboard.flat();
+  const message = sent.find(x => x.u === "sendMessage").b;
+  const flat = message.reply_markup.inline_keyboard.flat();
   assert.ok(flat.some(x => x.copy_text?.text === "01012345678"));
-  assert.ok(flat.some(x => x.text === "💬 واتساب" && x.url.startsWith("https://wa.me/")));
+  assert.ok(flat.some(x => x.text === "📤 إرسال تفاصيل الطلب للعميل" && x.url.startsWith("https://wa.me/")));
   assert.ok(flat.some(x => x.text === "📍 Google Maps" && x.url.includes("30.1%2C31.2")));
   assert.ok(flat.some(x => x.text === "🍎 Apple Maps" && x.url.startsWith("https://maps.apple.com/")));
-  assert.ok(flat.some(x => x.copy_text?.text === "01000000000"));
-  const waButton = flat.find(x => x.text === "💬 واتساب");
+  assert.equal(flat.some(x => x.copy_text?.text === "01000000000"), false);
+  assert.equal(message.text.includes("01000000000"), false);
+  assert.equal(message.text.includes("Test Wallet Owner"), false);
+
+  const waButton = flat.find(x => x.text === "📤 إرسال تفاصيل الطلب للعميل");
   const waText = new URL(waButton.url).searchParams.get("text");
-  assert.ok(waText.includes("Vodafone Cash — 01000000000 — باسم Test Wallet Owner"));
+  assert.ok(waText.includes("Vodafone Cash: 01000000000 — باسم Test Wallet Owner"));
+  assert.ok(waText.includes("طريقة الدفع: فودافون كاش"));
   assert.ok(waText.includes("الإجمالي: 170 جنيه."));
 });
 
-test("إلغاء الطلب يعرض الأسباب ويحفظ السبب المختار في D1", async () => {
+test("الدفع عند الاستلام لا يضيف أي بيانات محفظة إلى رسالة WhatsApp", async () => {
   const env = mkEnv(); sent.length = 0;
-  await post(env, "/api/order", ok);
-  const open = press(6681233049, "cancelled");
-  open.callback_query.data = "c:1:open";
-  await tgHook(env, open);
-  const reasonKeyboard = sent.find(x => x.u === "editMessageReplyMarkup").b.reply_markup.inline_keyboard.flat();
-  assert.ok(reasonKeyboard.some(x => x.callback_data === "c:1:no_answer"));
-
-  sent.length = 0;
-  const choose = press(6681233049, "cancelled");
-  choose.callback_query.data = "c:1:no_answer";
-  await tgHook(env, choose);
-  const row = env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get();
-  assert.equal(row.status, "cancelled");
-  assert.equal(row.cancel_reason, "العميل لا يرد");
-  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='cancelled'").get().c, 1);
-  assert.ok(sent.some(x => x.u === "editMessageText"));
+  await post(env, "/api/order", { ...ok, idem: "cash-wa-no-wallet-01", pay: "cash" });
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  const button = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "📤 إرسال تفاصيل الطلب للعميل");
+  const waText = new URL(button.url).searchParams.get("text");
+  assert.ok(waText.includes("طريقة الدفع: الدفع عند الاستلام"));
+  assert.equal(waText.includes("01000000000"), false);
+  assert.equal(waText.includes("Vodafone Cash"), false);
+  assert.equal(msg.text.includes("01000000000"), false);
 });
 
-test("سبب إلغاء مخصص يُطلب بالرد ويحفظ في الطلب", async () => {
+test("الإلغاء يتطلب تأكيداً، يزيل بقية الأزرار، ويعرض زر إعادة الإحياء فقط", async () => {
   const env = mkEnv(); sent.length = 0;
   await post(env, "/api/order", ok);
-  sent.length = 0;
-  const q = press(6681233049, "cancelled");
-  q.callback_query.data = "c:1:other";
-  await tgHook(env, q);
-  const prompt = sent.find(x => x.u === "sendMessage");
-  assert.ok(prompt.b.reply_markup.force_reply);
-  assert.match(prompt.b.text, /QST-0001/);
 
-  await tgHook(env, { message: {
-    text: "العميل طلب التأجيل ليوم آخر",
-    from: { id: 6681233049, first_name: "أحمد" },
-    chat: { id: -100 },
-    message_id: 99,
-    reply_to_message: { text: prompt.b.text, from: { id: 123, is_bot: true } }
-  } });
-  const row = env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get();
+  const ask = press(999, "cancelled");
+  ask.callback_query.data = "ask:1:cancelled";
+  await tgHook(env, ask);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+  const prompt = sent.find(x => x.u === "editMessageText");
+  assert.ok(prompt.b.text.includes("هل أنت متأكد من إلغاء الطلب؟"));
+  assert.ok(prompt.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "yes:1:cancelled"));
+  assert.ok(prompt.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "no:1:cancelled"));
+
+  // Explicitly choosing No must restore the original buttons.
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-no", data: "no:1:cancelled" } });
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+  const restored = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:confirmed"));
+
+  // Yes cancels and removes every action except the single revive button.
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:cancelled" } });
+  let row = env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get();
   assert.equal(row.status, "cancelled");
-  assert.equal(row.cancel_reason, "العميل طلب التأجيل ليوم آخر");
+  assert.equal(row.cancel_reason, null);
+  const cancelledMessage = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.ok(cancelledMessage.b.text.includes("الحالة: تم الإلغاء"));
+  assert.deepEqual(cancelledMessage.b.reply_markup.inline_keyboard.flat().map(x => x.text), ["♻️ إعادة إحياء الطلب"]);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='cancelled'").get().c, 1);
+
+  // Revive returns the order to new and clears cancellation fields.
+  const revive = { callback_query: { id: "q-revive", data: "revive:1:now", from: { id: 999 }, message: { chat: { id: -100 }, message_id: 42 } } };
+  await tgHook(env, revive);
+  row = env.db.prepare("SELECT status,cancel_reason,confirmed_by FROM orders WHERE id=1").get();
+  assert.equal(row.status, "new");
+  assert.equal(row.cancel_reason, null);
+  assert.equal(row.confirmed_by, null);
+  const revivedMessage = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.ok(revivedMessage.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:confirmed"));
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='revived'").get().c, 1);
+});
+
+test("تأكيد إلغاء الطلب لا يحفظ الإلغاء قبل الضغط على نعم", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", ok);
+  const ask = press(999, "cancelled");
+  ask.callback_query.data = "ask:1:cancelled";
+  await tgHook(env, ask);
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-no", data: "no:1:cancelled" } });
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='cancelled'").get().c, 0);
 });
 
 test("فشل معالجة callback يرسل تنبيهاً بدلاً من ترك زر Telegram معلقاً", async () => {
@@ -238,15 +281,15 @@ test("فشل معالجة callback يرسل تنبيهاً بدلاً من تر�
   assert.ok(sent.some(x => x.u === "answerCallbackQuery" && x.b.text.includes("تعذر تنفيذ الإجراء")));
 });
 
-test("طلب InstaPay لا يعرض رقمًا أو رابطًا مختلقًا إذا لم يتم ضبط الحساب", async () => {
+test("InstaPay مرفوض من الخادم حتى لو تم تجاوز الواجهة", async () => {
   const env = mkEnv(); sent.length = 0;
   const body = { ...ok, idem: "no-ipa-data-0001", pay: "instapay" };
-  await post(env, "/api/order", body);
-  const sentMessage = sent.find(x => x.u === "sendMessage");
-  assert.ok(sentMessage.b.text.includes("بيانات InstaPay غير مضبوطة"));
-  const buttons = sentMessage.b.reply_markup.inline_keyboard.flat();
-  assert.equal(buttons.some(x => x.text?.includes("InstaPay IPA")), false);
-  assert.equal(buttons.some(x => x.text?.includes("رابط InstaPay")), false);
+  const response = await post(env, "/api/order", body);
+  const result = await response.json();
+  assert.equal(response.status, 400);
+  assert.match(result.error, /InstaPay غير متاح حالياً/);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+  assert.equal(sent.filter(x => x.u === "sendMessage").length, 0);
 });
 
 test("طلب المحفظة يحذر المطبخ إذا لم يتم ضبط رقم التحويل", async () => {
@@ -279,4 +322,23 @@ test("إعادة رسم صفحة الدفع لا تمسح GPS المختار، �
   const submitBlock = html.slice(submitStart, submitEnd);
   assert.equal(openBlock.includes("loc = null"), false);
   assert.ok(submitBlock.includes("cart = []; idem = null; loc = null;"));
+});
+
+test("واجهة الدفع تعرض عدم إتاحة InstaPay وتعيد الاختيار إلى الدفع عند الاستلام", async () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.ok(html.includes("<span>الدفع عند الاستلام</span>"));
+  assert.ok(html.includes('id="paymsg"'));
+  assert.ok(html.includes('addEventListener("change"'));
+  assert.ok(html.includes("لم يتم إتاحة InstaPay حالياً"));
+  assert.ok(html.includes('input[name="pay"][value="cash"]'));
+});
+
+test("عند تأكيد الطلب تزال كل الأزرار، وعند الإلغاء يبقى زر الإحياء فقط", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", ok);
+  const ask = press(999, "confirmed");
+  await tgHook(env, ask);
+  await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:confirmed" } });
+  const confirmedMessage = sent.filter(x => x.u === "editMessageText").at(-1);
+  assert.deepEqual(confirmedMessage.b.reply_markup.inline_keyboard, []);
 });
