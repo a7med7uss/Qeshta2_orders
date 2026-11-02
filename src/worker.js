@@ -5,26 +5,137 @@ const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: 
 const PAY = { cash: "كاش", wallet: "محفظة", instapay: "إنستا" };
 const ST = { new: "جديد", confirmed: "تم التأكيد", out_for_delivery: "خرج للتوصيل", delivered: "تم التسليم", cancelled: "ملغي" };
 const NEXT = { new: ["confirmed", "cancelled"], confirmed: ["out_for_delivery", "cancelled"], out_for_delivery: ["delivered", "cancelled"] };
-const BTN = { confirmed: "✅ تم التأكيد", out_for_delivery: "🚚 خرج للتوصيل", delivered: "✔️ تم التسليم", cancelled: "❌ إلغاء" };
+const BTN = { confirmed: "✅ تم التأكيد", out_for_delivery: "🚚 خرج للتوصيل", delivered: "✔️ تم التسليم" };
+const CANCEL_REASONS = {
+  customer: "العميل طلب الإلغاء",
+  no_answer: "العميل لا يرد",
+  address: "العنوان غير واضح"
+};
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 const tg = (env, m, b) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${m}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json()).catch(() => ({ ok: false }));
-const kb = (id, st) => ({ inline_keyboard: [(NEXT[st] || []).map(n => ({ text: BTN[n], callback_data: `s:${id}:${n}` }))] });
 const owners = env => String(env.OWNER_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
 const isOwner = (env, id) => owners(env).includes(String(id));
 async function isStaff(env, id) { return isOwner(env, id) || !!(await env.DB.prepare("SELECT 1 x FROM staff WHERE telegram_id=? AND active=1").bind(id).first()); }
 
-// رسالة الطلب (الصيغة المعتمدة)
-function text(o, items) {
+function itemCategory(itemId) {
+  const c = MENU.categories.find(x => x.items?.some(i => i.id === itemId) || x.additions?.some(i => i.id === itemId));
+  if (!c) return "أصناف";
+  if (!c.parent_category) return c.name;
+  const parent = MENU.categories.find(x => x.id === c.parent_category);
+  return parent ? `${parent.name} › ${c.name}` : c.name;
+}
+function whatsappPhone(phone) {
+  const digits = String(phone || "").replace(/\\D/g, "");
+  if (digits.startsWith("0")) return "20" + digits.slice(1);
+  if (digits.startsWith("20")) return digits;
+  return digits;
+}
+function whatsappUrl(phone, message) {
+  const target = whatsappPhone(phone);
+  return target ? `https://wa.me/${target}?text=${encodeURIComponent(message.slice(0, 900))}` : null;
+}
+function orderWhatsAppMessage(o, items, env) {
+  const summary = items.map(i => `• ${itemCategory(i.id)} / ${i.name}${i.size ? ` (${i.size})` : ""} × ${i.qty}`).join("\n");
+  const lines = [
+    `السلام عليكم ${o.name}`,
+    `بخصوص طلبك ${o.code} من مطعم قشطة:`,
+    summary,
+    `الإجمالي: ${o.total} جنيه.`
+  ];
+  if (o.pay === "wallet") {
+    if (env.WALLET_NUMBER) lines.push(`بيانات التحويل: ${env.WALLET_PROVIDER || "المحفظة"} — ${env.WALLET_NUMBER}${env.WALLET_OWNER ? ` — باسم ${env.WALLET_OWNER}` : ""}`);
+    else lines.push("يرجى التواصل معنا لتأكيد بيانات المحفظة قبل التحويل.");
+    lines.push("بعد التحويل برجاء إرسال صورة تأكيد العملية.");
+  } else if (o.pay === "instapay") {
+    if (env.INSTAPAY_IPA) lines.push(`InstaPay IPA: ${env.INSTAPAY_IPA}`);
+    if (env.INSTAPAY_PAYMENT_LINK) lines.push(`رابط الدفع: ${env.INSTAPAY_PAYMENT_LINK}`);
+    if (!env.INSTAPAY_IPA && !env.INSTAPAY_PAYMENT_LINK) lines.push("بيانات InstaPay غير متاحة حالياً. برجاء انتظار تأكيد المطعم قبل التحويل.");
+    else lines.push("بعد التحويل برجاء إرسال صورة تأكيد العملية.");
+  }
+  lines.push("شكراً لطلبك من قشطة.");
+  return lines.join("\n");
+}
+function orderKeyboard(o, status, items, env) {
+  const rows = [];
+  const next = NEXT[status] || [];
+  const actions = next.filter(x => x !== "cancelled").map(n => ({ text: BTN[n], callback_data: `s:${o.id}:${n}` }));
+  if (actions.length) rows.push(actions);
+  if (next.includes("cancelled")) rows.push([{ text: "❌ إلغاء", callback_data: `c:${o.id}:open` }]);
+
+  const phone = String(o.phone || "").replace(/[\\s-]/g, "");
+  const contactRow = [];
+  if (phone) contactRow.push({ text: "📋 نسخ رقم العميل", copy_text: { text: phone.slice(0, 256) } });
+  const wa = whatsappUrl(phone, orderWhatsAppMessage(o, items, env));
+  if (wa) contactRow.push({ text: "💬 واتساب", url: wa });
+  if (contactRow.length) rows.push(contactRow);
+
+  if (o.lat !== null && o.lat !== undefined && o.lng !== null && o.lng !== undefined &&
+      Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))) {
+    const coords = `${o.lat},${o.lng}`;
+    rows.push([
+      { text: "📍 Google Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}` },
+      { text: "🍎 Apple Maps", url: `https://maps.apple.com/?ll=${encodeURIComponent(coords)}&q=${encodeURIComponent("موقع العميل")}` }
+    ]);
+  }
+
+  if (o.pay === "wallet" && env.WALLET_NUMBER) {
+    rows.push([{ text: "💳 نسخ رقم المحفظة", copy_text: { text: String(env.WALLET_NUMBER).slice(0, 256) } }]);
+  } else if (o.pay === "instapay") {
+    const payment = [];
+    if (env.INSTAPAY_IPA) payment.push({ text: "📋 نسخ InstaPay IPA", copy_text: { text: String(env.INSTAPAY_IPA).slice(0, 256) } });
+    if (env.INSTAPAY_PAYMENT_LINK && /^https:\\/\\//i.test(env.INSTAPAY_PAYMENT_LINK)) payment.push({ text: "فتح رابط InstaPay", url: env.INSTAPAY_PAYMENT_LINK });
+    if (payment.length) rows.push(payment);
+  }
+  return { inline_keyboard: rows };
+}
+
+// تنسيق مقسّم بوضوح لتقليل تزاحم النص على الهاتف.
+function text(o, items, env = {}) {
   const t = new Date(o.created_at || Date.now()).toLocaleTimeString("ar-EG", { timeZone: "Africa/Cairo", hour: "numeric", minute: "2-digit" });
-  const map = o.lat ? ` (https://maps.google.com/?q=${o.lat},${o.lng})` : "";
-  const L = items.map(i => `🍽 ${i.qty}× ${i.name}${i.size ? " " + i.size : ""} — ` + (i.pend ? "السعر بالتليفون" : `${i.unit * i.qty} ج`) + (!i.pend && i.base && i.unit > i.base ? ` (الأساس ${i.base} + زيادة ${i.unit - i.base})` : "") + (i.note ? `\n   📝 ${i.note}` : ""));
-  const pend = items.filter(i => i.pend).map(i => i.name);
-  return [`🔔 طلب جديد #${o.code}`, `👤 ${o.name} – ${o.phone}`, `📍 العنوان: ${o.address || "-"}${map}`, ...L,
-    `💰 الأكل ${o.subtotal} + التوصيل مجاني = الإجمالي ${o.total} ج`, `💳 الدفع: ${PAY[o.pay]}`,
-    ...(pend.length ? [`⚠️ سعر يتحدد بالتليفون: ${pend.join("، ")}`] : []), ...(o.dbFail ? ["⚠️ لم يُحفظ في القاعدة: سجّله يدوياً"] : []), `🕐 ${t}`].join("\n");
+  const itemLines = items.map((i, n) => {
+    const section = itemCategory(i.id);
+    const size = i.size ? ` — ${i.size}` : "";
+    const price = i.pend ? "السعر بالتليفون" : `${i.unit * i.qty} ج`;
+    const increase = !i.pend && i.base && i.unit > i.base ? ` (الأساس ${i.base} + زيادة ${i.unit - i.base})` : "";
+    return [`${n + 1}) ${section} / ${i.name}${size} × ${i.qty}`, `   السعر: ${price}${increase}`, ...(i.note ? [`   ملاحظة: ${i.note}`] : [])].join("\n");
+  });
+  const pending = items.filter(i => i.pend).map(i => i.name);
+  const lines = [
+    `🔔 طلب جديد #${o.code}`,
+    "━━━━━━━━━━━━━━━━━━",
+    "👤 بيانات العميل",
+    `الاسم: ${o.name}`,
+    `الهاتف: ${o.phone} (اضغط على الرقم للاتصال)`,
+    `العنوان: ${o.address || "غير مكتوب"}`,
+    ...(o.lat !== null && o.lat !== undefined && o.lng !== null && o.lng !== undefined ? [`إحداثيات الموقع: ${o.lat}, ${o.lng}`] : []),
+    "━━━━━━━━━━━━━━━━━━",
+    "🛒 تفاصيل الطلب",
+    ...itemLines,
+    "━━━━━━━━━━━━━━━━━━",
+    "💰 الحساب",
+    `قيمة الأكل: ${o.subtotal} جنيه`,
+    "التوصيل: مجاني",
+    `الإجمالي: ${o.total} جنيه`,
+    `طريقة الدفع: ${PAY[o.pay]}`,
+    ...(o.pay === "wallet" && env.WALLET_NUMBER ? [`المحفظة: ${env.WALLET_PROVIDER || "محفظة"} — ${env.WALLET_NUMBER}`] : []),
+    ...(o.pay === "instapay" && !env.INSTAPAY_IPA && !env.INSTAPAY_PAYMENT_LINK ? ["⚠️ بيانات InstaPay غير مضبوطة بعد؛ راجع العميل قبل التحويل."] : []),
+    ...(pending.length ? [`⚠️ سعر يتحدد بالتليفون: ${pending.join("، ")}`] : []),
+    ...(o.dbFail ? ["⚠️ لم يُحفظ في القاعدة: سجّله يدوياً"] : []),
+    ...(o.status && o.status !== "new" ? [`📌 الحالة: ${ST[o.status] || o.status}`] : []),
+    ...(o.cancel_reason ? [`سبب الإلغاء: ${o.cancel_reason}`] : []),
+    "━━━━━━━━━━━━━━━━━━",
+    `🕒 ${t}`
+  ];
+  const message = lines.join("\n");
+  return message.length > 3900 ? message.slice(0, 3880) + "\n… تم اختصار بقية التفاصيل." : message;
 }
 async function sendOrder(env, id, o, items) {
-  const r = await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: text(o, items), reply_markup: kb(id, "new"), disable_web_page_preview: true });
+  const r = await tg(env, "sendMessage", {
+    chat_id: env.CHAT_ID,
+    text: text({ ...o, id }, items, env),
+    reply_markup: orderKeyboard({ ...o, id }, "new", items, env),
+    disable_web_page_preview: true
+  });
   if (id && env.DB) await env.DB.prepare("UPDATE orders SET tg_attempts=tg_attempts+1, tg_sent=?, tg_message_id=? WHERE id=?").bind(r.ok ? 1 : 0, r.result?.message_id ?? null, id).run().catch(() => {});
   return r.ok;
 }
@@ -90,8 +201,8 @@ async function order(req, env) {
 
 async function rowToOrder(env, r) {
   const its = (await env.DB.prepare("SELECT item_ref,name,size,qty,base_price,chosen_price,note FROM order_items WHERE order_id=?").bind(r.id).all()).results;
-  return [{ code: r.code, name: r.customer_name, phone: r.phone, address: r.address_text, lat: r.lat, lng: r.lng, pay: r.payment_method, subtotal: r.subtotal, total: r.total, created_at: r.created_at },
-    its.map(i => ({ name: i.name, size: i.size, qty: i.qty, base: i.base_price, unit: Math.max(i.chosen_price, 0), pend: i.chosen_price < 0, note: i.note }))];
+  return [{ id: r.id, code: r.code, name: r.customer_name, phone: r.phone, address: r.address_text, lat: r.lat, lng: r.lng, pay: r.payment_method, subtotal: r.subtotal, total: r.total, created_at: r.created_at, status: r.status, cancel_reason: r.cancel_reason },
+    its.map(i => ({ id: i.item_ref, name: i.name, size: i.size, qty: i.qty, base: i.base_price, unit: Math.max(i.chosen_price, 0), pend: i.chosen_price < 0, note: i.note }))];
 }
 async function retry(env) {
   const rows = (await env.DB.prepare("SELECT * FROM orders WHERE tg_sent=0 AND tg_attempts<5 AND status='new' ORDER BY id LIMIT 5").all()).results;
