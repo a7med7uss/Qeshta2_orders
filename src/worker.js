@@ -358,7 +358,7 @@ async function onCommand(m, env) {
       `callback_query: ${callbackEnabled ? "مفعّل" : "غير مفعّل"}`,
       `الرسائل المعلقة: ${Number(info.result?.pending_update_count || 0)}`,
       ...(lastError ? [`آخر خطأ من Telegram: ${String(lastError).slice(0, 300)}`] : [])
-    ].join("\\n"));
+    ].join("\n"));
   }
   if (!(await isStaff(env, uid))) return;
   if (t === "/pending") {
