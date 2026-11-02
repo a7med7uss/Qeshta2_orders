@@ -139,7 +139,7 @@ test("أزرار الطلب تشمل نسخ الهاتف وواتساب وخرا
   const flat = keyboard.flat();
   assert.ok(flat.some(x => x.copy_text?.text === "01012345678"));
   assert.ok(flat.some(x => x.text === "💬 واتساب" && x.url.startsWith("https://wa.me/")));
-  assert.ok(flat.some(x => x.text === "📍 Google Maps" && x.url.includes("30.1,31.2")));
+  assert.ok(flat.some(x => x.text === "📍 Google Maps" && x.url.includes("30.1%2C31.2")));
   assert.ok(flat.some(x => x.text === "🍎 Apple Maps" && x.url.startsWith("https://maps.apple.com/")));
   assert.ok(flat.some(x => x.copy_text?.text === "01006821635"));
 });
@@ -167,6 +167,7 @@ test("إلغاء الطلب يعرض الأسباب ويحفظ السبب الم
 test("سبب إلغاء مخصص يُطلب بالرد ويحفظ في الطلب", async () => {
   const env = mkEnv(); sent.length = 0;
   await post(env, "/api/order", ok);
+  sent.length = 0;
   const q = press(6681233049, "cancelled");
   q.callback_query.data = "c:1:other";
   await tgHook(env, q);
