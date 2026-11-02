@@ -149,7 +149,7 @@ async function handleOrderAction(req, env) {
     const origin = req.headers.get("origin") || (() => {
       try { return new URL(req.headers.get("referer") || "").origin; } catch { return ""; }
     })();
-    if (origin !== ORDER_ACTION_BASE)
+    if (origin && origin !== ORDER_ACTION_BASE)
       return orderActionHtml("تعذر تنفيذ الإجراء", "افتح الزر من رسالة الطلب داخل Telegram ثم حاول مرة أخرى.", "", "", 403);
     const form = await req.formData().catch(() => null);
     token = String(form && form.get("token") || "");
