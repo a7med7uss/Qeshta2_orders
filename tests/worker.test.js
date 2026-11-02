@@ -361,7 +361,7 @@ test("أمر /fixbuttons يفعّل callback_query في Webhook للمالك ف�
   const env = mkEnv(); sent.length = 0;
   const message = (uid, id) => ({ message: {
     text: "/fixbuttons",
-    from: { id },
+    from: { id: uid },
     chat: { id: -100 },
     message_id: id
   } });
