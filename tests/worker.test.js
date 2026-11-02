@@ -6,7 +6,21 @@ function mkEnv() {
   const prep = sql => { let a = []; const o = { bind: (...x) => (a = x, o), run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...a).changes) } }), first: async () => db.prepare(sql).get(...a) ?? null, all: async () => ({ results: db.prepare(sql).all(...a) }), _r: () => db.prepare(sql).run(...a) }; return o; };
   return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec", TURNSTILE_SECRET: "turnstile-test-secret", WALLET_PROVIDER: "Vodafone Cash", WALLET_NUMBER: "01000000000", WALLET_OWNER: "Test Wallet Owner" };
 }
-const sent = []; globalThis.fetch = async (u, i) => { const b = i?.body && typeof i.body === "string" ? JSON.parse(i.body) : {}; sent.push({ u: String(u).split("/").pop(), b }); return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) }; };
+const sent = [];
+let webhookConfig = { url: "", allowed_updates: [] };
+globalThis.fetch = async (u, i) => {
+  const method = String(u).split("/").pop();
+  const b = i?.body && typeof i.body === "string" ? JSON.parse(i.body) : {};
+  sent.push({ u: method, b });
+  if (method === "setWebhook") {
+    webhookConfig = { url: b.url, allowed_updates: b.allowed_updates };
+    return { json: async () => ({ ok: true, result: true }) };
+  }
+  if (method === "getWebhookInfo") {
+    return { json: async () => ({ ok: true, result: { ...webhookConfig, pending_update_count: 0 } }) };
+  }
+  return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) };
+};
 const post = (env, path, body, h = {}) => worker.fetch(new Request("https://x" + path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) }), env);
 const ok = { idem: "idem-test-0001", name: "أحمد محمد", phone: "01012345678", address: "شارع النصر", lat: 30.1, lng: 31.2, pay: "cash", lines: [{ id: "c01", amount: 120, qty: 1, note: "" }, { id: "cf10", qty: 2 }] };
 const tgHook = (env, upd, secret = "sec") => post(env, "/api/tg", upd, { "x-telegram-bot-api-secret-token": secret });
@@ -341,4 +355,29 @@ test("عند تأكيد الطلب تزال كل الأزرار، وعند ال�
   await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:confirmed" } });
   const confirmedMessage = sent.filter(x => x.u === "editMessageText").at(-1);
   assert.deepEqual(confirmedMessage.b.reply_markup.inline_keyboard, []);
+});
+
+test("أمر /fixbuttons يفعّل callback_query في Webhook للمالك فقط", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const message = (uid, id) => ({ message: {
+    text: "/fixbuttons",
+    from: { id: uid },
+    chat: { id: -100 },
+    message_id: id
+  } });
+
+  await tgHook(env, message(999, 4));
+  assert.equal(sent.some(x => x.u === "setWebhook"), false, "غير المالك لا يستطيع تغيير Webhook");
+
+  await tgHook(env, message(6681233049, 5));
+  const set = sent.find(x => x.u === "setWebhook");
+  assert.ok(set, JSON.stringify(sent));
+  assert.equal(set.b.url, "https://qeshta2-orders.qeshta.workers.dev/api/tg");
+  assert.deepEqual(set.b.allowed_updates, ["message", "callback_query"]);
+  assert.equal(set.b.secret_token, "sec");
+  assert.equal(set.b.drop_pending_updates, false);
+  assert.ok(sent.some(x => x.u === "getWebhookInfo"));
+  const reply = sent.filter(x => x.u === "sendMessage").at(-1);
+  assert.ok(reply.b.text.includes("callback_query: مفعّل"));
+  assert.ok(reply.b.text.includes("العنوان: صحيح"));
 });
