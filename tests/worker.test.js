@@ -268,3 +268,15 @@ test("الواجهة تطلب GPS بدقة عالية ولا ترسل الطلب
   assert.ok(html.includes("navigator.geolocation.getCurrentPosition"));
   assert.ok(html.includes("lat: loc.lat, lng: loc.lng"));
 });
+
+test("إعادة رسم صفحة الدفع لا تمسح GPS المختار، ويمسح بعد نجاح الطلب", async () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const openStart = html.indexOf("function openCheckout()");
+  const openEnd = html.indexOf("async function submit()", openStart);
+  const submitStart = openEnd;
+  const submitEnd = html.indexOf("document.addEventListener", submitStart);
+  const openBlock = html.slice(openStart, openEnd);
+  const submitBlock = html.slice(submitStart, submitEnd);
+  assert.equal(openBlock.includes("loc = null"), false);
+  assert.ok(submitBlock.includes("cart = []; idem = null; loc = null;"));
+});
