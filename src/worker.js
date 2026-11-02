@@ -2,15 +2,10 @@ import { MENU } from "../public/lib/menu-data.js";
 import { priceCart } from "../public/lib/pricing.js";
 
 const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "content-type": "application/json; charset=utf-8" } });
-const PAY = { cash: "كاش", wallet: "محفظة", instapay: "إنستا" };
-const ST = { new: "جديد", confirmed: "تم التأكيد", out_for_delivery: "خرج للتوصيل", delivered: "تم التسليم", cancelled: "ملغي" };
+const PAY = { cash: "الدفع عند الاستلام", wallet: "محفظة", instapay: "إنستا (غير متاح)" };
+const ST = { new: "طلب جديد", confirmed: "تم التأكيد", out_for_delivery: "خرج للتوصيل", delivered: "تم التسليم", cancelled: "تم الإلغاء" };
 const NEXT = { new: ["confirmed", "cancelled"], confirmed: ["out_for_delivery", "cancelled"], out_for_delivery: ["delivered", "cancelled"] };
 const BTN = { confirmed: "✅ تم التأكيد", out_for_delivery: "🚚 خرج للتوصيل", delivered: "✔️ تم التسليم" };
-const CANCEL_REASONS = {
-  customer: "العميل طلب الإلغاء",
-  no_answer: "العميل لا يرد",
-  address: "العنوان غير واضح"
-};
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 const tg = (env, m, b) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${m}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json()).catch(() => ({ ok: false }));
 const owners = env => String(env.OWNER_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -35,38 +30,53 @@ function whatsappUrl(phone, message) {
   return target ? `https://wa.me/${target}?text=${encodeURIComponent(message.slice(0, 900))}` : null;
 }
 function orderWhatsAppMessage(o, items, env) {
-  const summary = items.map(i => `• ${itemCategory(i.id)} / ${i.name}${i.size ? ` (${i.size})` : ""} × ${i.qty}`).join("\n");
+  const summary = items.map(i => {
+    const size = i.size ? ` (${i.size})` : "";
+    const price = i.pend ? "السعر يحدد بالتواصل" : ` — ${i.unit * i.qty} جنيه`;
+    return [
+      `• ${itemCategory(i.id)} / ${i.name}${size} × ${i.qty}${price}`,
+      ...(i.note ? [`  ملاحظة: ${i.note}`] : [])
+    ].join("\n");
+  }).join("\n");
   const lines = [
     `السلام عليكم ${o.name}`,
-    `بخصوص طلبك ${o.code} من مطعم قشطة:`,
+    `بخصوص طلبك رقم ${o.code} من مطعم قشطة:`,
+    "",
     summary,
-    `الإجمالي: ${o.total} جنيه.`
+    "",
+    `الإجمالي: ${o.total} جنيه.`,
+    `طريقة الدفع: ${o.pay === "wallet" ? "فودافون كاش" : o.pay === "cash" ? "الدفع عند الاستلام" : "إنستا باي غير متاح حالياً"}.`
   ];
   if (o.pay === "wallet") {
-    if (env.WALLET_NUMBER) lines.push(`بيانات التحويل: ${env.WALLET_PROVIDER || "المحفظة"} — ${env.WALLET_NUMBER}${env.WALLET_OWNER ? ` — باسم ${env.WALLET_OWNER}` : ""}`);
-    else lines.push("يرجى التواصل معنا لتأكيد بيانات المحفظة قبل التحويل.");
-    lines.push("بعد التحويل برجاء إرسال صورة تأكيد العملية.");
-  } else if (o.pay === "instapay") {
-    if (env.INSTAPAY_IPA) lines.push(`InstaPay IPA: ${env.INSTAPAY_IPA}`);
-    if (env.INSTAPAY_PAYMENT_LINK) lines.push(`رابط الدفع: ${env.INSTAPAY_PAYMENT_LINK}`);
-    if (!env.INSTAPAY_IPA && !env.INSTAPAY_PAYMENT_LINK) lines.push("بيانات InstaPay غير متاحة حالياً. برجاء انتظار تأكيد المطعم قبل التحويل.");
-    else lines.push("بعد التحويل برجاء إرسال صورة تأكيد العملية.");
+    if (env.WALLET_NUMBER) {
+      lines.push("");
+      lines.push("بيانات التحويل:");
+      lines.push(`${env.WALLET_PROVIDER || "Vodafone Cash"}: ${env.WALLET_NUMBER}${env.WALLET_OWNER ? ` — باسم ${env.WALLET_OWNER}` : ""}`);
+      lines.push("بعد التحويل برجاء إرسال صورة تأكيد العملية على نفس المحادثة.");
+    } else {
+      lines.push("بيانات التحويل غير متاحة حالياً. برجاء انتظار تأكيد المطعم قبل التحويل.");
+    }
   }
-  lines.push("شكراً لطلبك من قشطة.");
+  lines.push("", "شكراً لطلبك من قشطة.");
   return lines.join("\n");
 }
 function orderKeyboard(o, status, items, env) {
-  const rows = [];
-  const next = NEXT[status] || [];
-  const actions = next.filter(x => x !== "cancelled").map(n => ({ text: BTN[n], callback_data: `s:${o.id}:${n}` }));
-  if (actions.length) rows.push(actions);
-  if (next.includes("cancelled")) rows.push([{ text: "❌ إلغاء", callback_data: `c:${o.id}:open` }]);
+  if (status === "cancelled") {
+    return { inline_keyboard: [[{ text: "♻️ إعادة إحياء الطلب", callback_data: `revive:${o.id}:now` }]] };
+  }
+  // Once confirmed, all inline actions are removed from the message.
+  if (status !== "new") return { inline_keyboard: [] };
 
-  const phone = String(o.phone || "").replace(/[\s-]/g, "");
+  const rows = [[
+    { text: "✅ تأكيد الطلب", callback_data: `ask:${o.id}:confirmed` },
+    { text: "❌ إلغاء الطلب", callback_data: `ask:${o.id}:cancelled` }
+  ]];
+
+  const phone = String(o.phone || "").replace(/[\\s-]/g, "");
   const contactRow = [];
   if (phone) contactRow.push({ text: "📋 نسخ رقم العميل", copy_text: { text: phone.slice(0, 256) } });
   const wa = whatsappUrl(phone, orderWhatsAppMessage(o, items, env));
-  if (wa) contactRow.push({ text: "💬 واتساب", url: wa });
+  if (wa) contactRow.push({ text: "📤 إرسال تفاصيل الطلب للعميل", url: wa });
   if (contactRow.length) rows.push(contactRow);
 
   if (o.lat !== null && o.lat !== undefined && o.lng !== null && o.lng !== undefined &&
@@ -76,15 +86,6 @@ function orderKeyboard(o, status, items, env) {
       { text: "📍 Google Maps", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}` },
       { text: "🍎 Apple Maps", url: `https://maps.apple.com/?ll=${encodeURIComponent(coords)}&q=${encodeURIComponent("موقع العميل")}` }
     ]);
-  }
-
-  if (o.pay === "wallet" && env.WALLET_NUMBER) {
-    rows.push([{ text: "💳 نسخ رقم المحفظة", copy_text: { text: String(env.WALLET_NUMBER).slice(0, 256) } }]);
-  } else if (o.pay === "instapay") {
-    const payment = [];
-    if (env.INSTAPAY_IPA) payment.push({ text: "📋 نسخ InstaPay IPA", copy_text: { text: String(env.INSTAPAY_IPA).slice(0, 256) } });
-    if (env.INSTAPAY_PAYMENT_LINK && /^https:\/\//i.test(env.INSTAPAY_PAYMENT_LINK)) payment.push({ text: "فتح رابط InstaPay", url: env.INSTAPAY_PAYMENT_LINK });
-    if (payment.length) rows.push(payment);
   }
   return { inline_keyboard: rows };
 }
@@ -117,7 +118,6 @@ function text(o, items, env = {}) {
     "التوصيل: مجاني",
     `الإجمالي: ${o.total} جنيه`,
     `طريقة الدفع: ${PAY[o.pay]}`,
-    ...(o.pay === "wallet" && env.WALLET_NUMBER ? [`المحفظة: ${env.WALLET_PROVIDER || "محفظة"} — ${env.WALLET_NUMBER}`] : []),
     ...(o.pay === "wallet" && !env.WALLET_NUMBER ? ["⚠️ رقم المحفظة غير مضبوط في إعدادات Worker؛ لا تحوّل قبل تأكيد المطعم."] : []),
     ...(o.pay === "instapay" && !env.INSTAPAY_IPA && !env.INSTAPAY_PAYMENT_LINK ? ["⚠️ بيانات InstaPay غير مضبوطة بعد؛ راجع العميل قبل التحويل."] : []),
     ...(pending.length ? [`⚠️ سعر يتحدد بالتليفون: ${pending.join("، ")}`] : []),
@@ -160,6 +160,7 @@ async function order(req, env) {
   if (!hasCoordinates) return J({ error: "حدد موقعك الدقيق من زر تحديد الموقع قبل تأكيد الطلب" }, 400);
   if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
+  if (b.pay === "instapay") return J({ error: "InstaPay غير متاح حالياً. اختر الدفع عند الاستلام أو فودافون كاش." }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
   // Idempotent retries must work even when the original one-use Turnstile token has expired.
   try {
@@ -213,25 +214,74 @@ async function retry(env) {
 
 async function editOrderTelegramMessage(env, row, chatId = env.CHAT_ID, messageId = row.tg_message_id) {
   const [o, items] = await rowToOrder(env, row);
-  await tg(env, "editMessageText", {
+  const result = await tg(env, "editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text: text(o, items, env),
     reply_markup: orderKeyboard(o, row.status, items, env),
     disable_web_page_preview: true
   });
+  return !!result.ok;
 }
-async function changeOrderStatus(env, row, to, uid, reason = null, chatId = env.CHAT_ID, messageId = row.tg_message_id) {
-  if (!(NEXT[row.status] || []).includes(to)) return { ok: false, message: "الحالة اتغيّرت بالفعل" };
+async function changeOrderStatus(env, row, to, uid, chatId, messageId) {
+  if (!(NEXT[row.status] || []).includes(to)) return { ok: false, message: "حالة الطلب اتغيّرت بالفعل" };
   const result = await env.DB.prepare(
-    `UPDATE orders SET status=?, cancel_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancel_reason END, confirmed_by=CASE WHEN ?='confirmed' THEN ? ELSE confirmed_by END, updated_at=${NOW} WHERE id=? AND status=?`
-  ).bind(to, to, reason, to, uid, row.id, row.status).run();
-  if (!result.meta.changes) return { ok: false, message: "الحالة اتغيّرت بالفعل من موظف آخر" };
+    `UPDATE orders SET status=?, cancel_reason=NULL, confirmed_by=CASE WHEN ?='confirmed' THEN ? ELSE confirmed_by END, updated_at=${NOW} WHERE id=? AND status=?`
+  ).bind(to, to, uid, row.id, row.status).run();
+  if (!result.meta.changes) return { ok: false, message: "حالة الطلب اتغيّرت بالفعل من عضو آخر" };
   await env.DB.prepare("INSERT INTO order_events(order_id,event,by_telegram_id) VALUES(?,?,?)")
     .bind(row.id, to, uid).run();
   const refreshed = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(row.id).first();
-  if (refreshed) await editOrderTelegramMessage(env, refreshed, chatId, messageId);
-  return { ok: true, message: ST[to] || to };
+  const messageUpdated = refreshed
+    ? await editOrderTelegramMessage(env, refreshed, chatId, messageId)
+    : false;
+  return {
+    ok: true,
+    message: to === "confirmed" ? "تم تأكيد الطلب" : "تم إلغاء الطلب",
+    messageUpdated
+  };
+}
+async function showOrderDecision(q, env, row, to) {
+  if (!["confirmed", "cancelled"].includes(to)) return { ok: false, message: "الإجراء غير معروف" };
+  if (row.status !== "new") return { ok: false, message: "لا يمكن تغيير هذا الطلب؛ حالته الحالية: " + (ST[row.status] || row.status) };
+  const [o, items] = await rowToOrder(env, row);
+  const question = to === "confirmed" ? "هل أنت متأكد من تأكيد الطلب؟" : "هل أنت متأكد من إلغاء الطلب؟";
+  const result = await tg(env, "editMessageText", {
+    chat_id: q.message.chat.id,
+    message_id: q.message.message_id,
+    text: text(o, items, env) + "\n\n⚠️ " + question,
+    reply_markup: { inline_keyboard: [[
+      { text: to === "confirmed" ? "نعم، تأكيد الطلب" : "نعم، إلغاء الطلب", callback_data: `yes:${row.id}:${to}` },
+      { text: "لا، تراجع", callback_data: `no:${row.id}:${to}` }
+    ]] },
+    disable_web_page_preview: true
+  });
+  return { ok: !!result.ok, message: result.ok ? question : "تعذر عرض رسالة التأكيد. حاول مرة أخرى." };
+}
+async function restoreOrderMessage(q, env, row) {
+  const [o, items] = await rowToOrder(env, row);
+  const result = await tg(env, "editMessageText", {
+    chat_id: q.message.chat.id,
+    message_id: q.message.message_id,
+    text: text(o, items, env),
+    reply_markup: orderKeyboard(o, row.status, items, env),
+    disable_web_page_preview: true
+  });
+  return !!result.ok;
+}
+async function reviveOrder(env, row, uid, chatId, messageId) {
+  if (row.status !== "cancelled") return { ok: false, message: "الطلب ليس ملغياً" };
+  const result = await env.DB.prepare(
+    `UPDATE orders SET status='new', cancel_reason=NULL, confirmed_by=NULL, updated_at=${NOW} WHERE id=? AND status='cancelled'`
+  ).bind(row.id).run();
+  if (!result.meta.changes) return { ok: false, message: "تم تحديث الطلب من عضو آخر" };
+  await env.DB.prepare("INSERT INTO order_events(order_id,event,by_telegram_id) VALUES(?,'revived',?)")
+    .bind(row.id, uid).run();
+  const refreshed = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(row.id).first();
+  const messageUpdated = refreshed
+    ? await editOrderTelegramMessage(env, refreshed, chatId, messageId)
+    : false;
+  return { ok: true, message: "تم إحياء الطلب وإعادته كطلب جديد", messageUpdated };
 }
 async function onButton(q, env) {
   const ans = (t, alert = false) => tg(env, "answerCallbackQuery", { callback_query_id: q.id, text: t, show_alert: alert });
@@ -239,88 +289,43 @@ async function onButton(q, env) {
     const [kind, sid, action] = String(q.data || "").split(":");
     const id = Number(sid), uid = q.from?.id;
     if (!Number.isSafeInteger(id) || id < 1) return ans("رقم الطلب غير صالح", true);
-    // Any member who can interact with this message in the configured kitchen group may manage this order.
     const row = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(id).first();
     if (!row) return ans("الطلب غير موجود", true);
 
-    if ((kind === "c" && action === "open") || (kind === "s" && action === "cancelled")) {
-      await tg(env, "editMessageReplyMarkup", {
-        chat_id: q.message.chat.id,
-        message_id: q.message.message_id,
-        reply_markup: { inline_keyboard: [
-          [
-            { text: "العميل طلب الإلغاء", callback_data: `c:${id}:customer` },
-            { text: "العميل لا يرد", callback_data: `c:${id}:no_answer` }
-          ],
-          [
-            { text: "العنوان غير واضح", callback_data: `c:${id}:address` },
-            { text: "سبب آخر", callback_data: `c:${id}:other` }
-          ],
-          [{ text: "رجوع", callback_data: `c:${id}:back` }]
-        ] }
-      });
-      return ans("اختر سبب الإلغاء");
+    // New buttons and legacy buttons both open the confirmation step, never mutate status immediately.
+    if ((kind === "ask" && ["confirmed", "cancelled"].includes(action)) ||
+        (kind === "s" && ["confirmed", "cancelled"].includes(action)) ||
+        (kind === "c" && ["open", "customer", "no_answer", "address", "other"].includes(action))) {
+      const decision = await showOrderDecision(q, env, row, action === "confirmed" ? "confirmed" : "cancelled");
+      return ans(decision.message, !decision.ok);
     }
 
-    if (kind === "c" && action === "back") {
-      const [o, items] = await rowToOrder(env, row);
-      await tg(env, "editMessageReplyMarkup", {
-        chat_id: q.message.chat.id,
-        message_id: q.message.message_id,
-        reply_markup: orderKeyboard(o, row.status, items, env)
-      });
-      return ans("تم الرجوع");
+    if (kind === "yes" && ["confirmed", "cancelled"].includes(action)) {
+      const result = await changeOrderStatus(env, row, action, uid, q.message.chat.id, q.message.message_id);
+      if (!result.ok) return ans(result.message, true);
+      if (!result.messageUpdated) return ans(result.message + "، لكن تعذر تحديث نص رسالة Telegram", true);
+      return ans(result.message);
     }
 
-    if (kind === "c" && action === "other") {
-      await tg(env, "sendMessage", {
-        chat_id: env.CHAT_ID,
-        text: `اكتب سبب إلغاء الطلب #${row.code} بالرد على هذه الرسالة.`,
-        reply_to_message_id: q.message.message_id,
-        reply_markup: { force_reply: true, selective: true, input_field_placeholder: "اكتب سبب الإلغاء" }
-      });
-      return ans("اكتب السبب في رسالة رد");
+    if (kind === "no" && ["confirmed", "cancelled"].includes(action)) {
+      if (row.status !== "new") return ans("الطلب اتغيّرت حالته بالفعل", true);
+      const restored = await restoreOrderMessage(q, env, row);
+      return ans(restored ? "تم التراجع، لم تتغير حالة الطلب" : "تعذر استعادة رسالة الطلب", !restored);
     }
 
-    if (kind === "c" && Object.hasOwn(CANCEL_REASONS, action)) {
-      const result = await changeOrderStatus(env, row, "cancelled", uid, CANCEL_REASONS[action], q.message.chat.id, q.message.message_id);
-      return ans(result.message, !result.ok);
+    if (kind === "revive" && action === "now") {
+      const result = await reviveOrder(env, row, uid, q.message.chat.id, q.message.message_id);
+      if (!result.ok) return ans(result.message, true);
+      if (!result.messageUpdated) return ans(result.message + "، لكن تعذر تحديث رسالة Telegram", true);
+      return ans(result.message);
     }
 
-    if (kind === "s" && ["confirmed", "out_for_delivery", "delivered"].includes(action)) {
-      const result = await changeOrderStatus(env, row, action, uid, null, q.message.chat.id, q.message.message_id);
-      return ans(result.message, !result.ok);
-    }
-
-    return ans("الإجراء غير معروف", true);
+    return ans("هذا الزر لم يعد متاحاً. حدّث رسالة الطلب.", true);
   } catch (error) {
     console.error("Telegram callback failed:", error);
     return ans("تعذر تنفيذ الإجراء. حاول مرة أخرى أو راجع سجلات Worker.", true);
   }
 }
-async function onCancelReasonReply(m, env) {
-  const prompt = String(m.reply_to_message?.text || "");
-  const match = prompt.match(/^اكتب سبب إلغاء الطلب #([A-Z0-9-]+)/);
-  if (!match) return false;
-  const reason = String(m.text || "").trim().slice(0, 200);
-  if (reason.length < 3) {
-    await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: "اكتب سبباً أوضح (3 أحرف على الأقل).", reply_to_message_id: m.message_id });
-    return true;
-  }
-  const row = await env.DB.prepare("SELECT * FROM orders WHERE code=?").bind(match[1]).first();
-  if (!row) {
-    await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: "الطلب غير موجود.", reply_to_message_id: m.message_id });
-    return true;
-  }
-  const result = await changeOrderStatus(env, row, "cancelled", m.from.id, reason);
-  await tg(env, "sendMessage", {
-    chat_id: env.CHAT_ID,
-    text: result.ok ? `تم إلغاء ${row.code}. السبب: ${reason}` : result.message,
-    reply_to_message_id: m.message_id
-  });
-  return true;
-}
-
 async function onCommand(m, env) {
   const [cmd, arg] = m.text.trim().split(/\s+/), t = cmd.split("@")[0], uid = m.from.id;
   const rep = s => tg(env, "sendMessage", { chat_id: m.chat.id, text: s, reply_to_message_id: m.message_id });
@@ -365,8 +370,6 @@ async function hook(req, env) {
         const publicMyIdLookup = command === "/myid";
         const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
         if (publicMyIdLookup || ownerChatIdLookup || (adminChat && actualChat === adminChat)) await onCommand(m, env);
-      } else if (adminChat && actualChat === adminChat && m.reply_to_message) {
-        await onCancelReasonReply(m, env);
       }
     }
   } catch (error) {
