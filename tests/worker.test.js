@@ -371,7 +371,7 @@ test("أمر /fixbuttons يفعّل callback_query في Webhook للمالك ف�
 
   await tgHook(env, message(6681233049, 5));
   const set = sent.find(x => x.u === "setWebhook");
-  assert.ok(set);
+  assert.ok(set, JSON.stringify(sent));
   assert.equal(set.b.url, "https://qeshta2-orders.qeshta.workers.dev/api/tg");
   assert.deepEqual(set.b.allowed_updates, ["message", "callback_query"]);
   assert.equal(set.b.secret_token, "sec");
