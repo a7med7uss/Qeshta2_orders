@@ -95,7 +95,7 @@ function drawItem(msg = "") {
 function addLine(l) { const k = l.id + "|" + l.amount + "|" + l.note, f = cart.find(x => x.k === k); f ? f.qty++ : cart.push({ ...l, k }); sfx.add(); bar(); }
 // ---- السلة والدفع
 function openCheckout() {
-  idem ??= crypto.randomUUID(); loc = null; const m = IDX; 
+  idem ??= crypto.randomUUID(); const m = IDX; 
   $("#pane").innerHTML = `<h3>طلبك</h3>${cart.map((l, i) => `<div class="line"><span>${m.get(l.id).name}${l.note ? " <small>(" + l.note + ")</small>" : ""}<br><small>${m.get(l.id).kind === "fixed" ? m.get(l.id).amount : l.amount || ""} ${l.amount || m.get(l.id).kind === "fixed" ? "ج" : ""}</small></span><span class="q"><button data-q="${i}:1">+</button> ${l.qty} <button data-q="${i}:-1">−</button></span></div>`).join("")}
   <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
   <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
@@ -113,7 +113,7 @@ async function submit() {
   try {
     const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), d = await r.json();
     if (!r.ok) { er(d.error || "حصل خطأ، حاول تاني"); $("#go").disabled = false; window.turnstile && ts !== null && turnstile.reset(ts); tok = ""; return; }
-    cart = []; idem = null; bar(); sfx.win();
+    cart = []; idem = null; loc = null; bar(); sfx.win();
     $("#pane").innerHTML = `<div style="text-align:center"><div style="font-size:56px">🎉</div><h3>تم استلام طلبك</h3><p class="price" style="color:var(--gold)">${d.code}</p><p>هنتصل بيك على رقمك لتأكيد الطلب.</p><button class="btn big" id="x">تمام</button></div>`;
   } catch { er("مفيش اتصال، حاول تاني"); $("#go").disabled = false; }
 }
