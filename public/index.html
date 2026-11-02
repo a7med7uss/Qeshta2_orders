@@ -95,11 +95,11 @@ function drawItem(msg = "") {
 function addLine(l) { const k = l.id + "|" + l.amount + "|" + l.note, f = cart.find(x => x.k === k); f ? f.qty++ : cart.push({ ...l, k }); sfx.add(); bar(); }
 // ---- السلة والدفع
 function openCheckout() {
-  idem ??= crypto.randomUUID(); const m = IDX; 
+  idem ??= crypto.randomUUID(); loc = null; const m = IDX; 
   $("#pane").innerHTML = `<h3>طلبك</h3>${cart.map((l, i) => `<div class="line"><span>${m.get(l.id).name}${l.note ? " <small>(" + l.note + ")</small>" : ""}<br><small>${m.get(l.id).kind === "fixed" ? m.get(l.id).amount : l.amount || ""} ${l.amount || m.get(l.id).kind === "fixed" ? "ج" : ""}</small></span><span class="q"><button data-q="${i}:1">+</button> ${l.qty} <button data-q="${i}:-1">−</button></span></div>`).join("")}
   <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
   <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
-  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل"></textarea><button class="btn alt big" id="loc">📍 استخدم موقعي</button><div class="msg" id="lm"></div>
+  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل"></textarea><button class="btn alt big" id="loc" type="button">📍 حدد موقعي بدقة</button><div class="msg" id="lm" role="status">الموقع الدقيق لم يُحدد بعد. اضغط الزر واسمح للمتصفح بالوصول للموقع.</div>
   <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>كاش</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div>
   <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go">تأكيد الطلب</button>`;
   $("#sheet").hidden = false;
@@ -107,7 +107,8 @@ function openCheckout() {
 }
 async function submit() {
   const g = id => $(id).value.trim(), er = m => $("#er").textContent = m;
-  const body = { idem, name: g("#nm"), phone: g("#ph"), address: g("#ad"), lat: loc?.lat, lng: loc?.lng, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
+  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) { er("حدد موقعك الدقيق أولاً من زر «حدد موقعي بدقة» واسمح للمتصفح بالوصول للموقع."); $("#lm").textContent = "لم يتم تحديد الموقع الدقيق بعد."; return; }
+  const body = { idem, name: g("#nm"), phone: g("#ph"), address: g("#ad"), lat: loc.lat, lng: loc.lng, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
   $("#go").disabled = true; er("");
   try {
     const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), d = await r.json();
@@ -124,7 +125,38 @@ document.addEventListener("click", e => {
   else if (t.id === "add") { const rm = [...document.querySelectorAll("[data-rm]:checked")].map(x => x.dataset.rm), note = [rm.length ? "بدون: " + rm.join("، ") : "", $("#note").value.trim()].filter(Boolean).join(" — "); addLine({ id: cur.it.id, amount: cur.amount, qty: 1, note }); close(); }
   else if (t.id === "bar") openCheckout();
   else if (t.dataset.q) { const [i, d] = t.dataset.q.split(":").map(Number); cart[i].qty += d; if (cart[i].qty < 1) cart.splice(i, 1); bar(); cart.length ? openCheckout() : close(); }
-  else if (t.id === "loc") navigator.geolocation?.getCurrentPosition(p => { loc = { lat: +p.coords.latitude.toFixed(6), lng: +p.coords.longitude.toFixed(6) }; $("#lm").textContent = "تم تحديد موقعك ✓"; }, () => $("#lm").textContent = "تعذر تحديد الموقع، اكتب العنوان");
+  else if (t.id === "loc") {
+    const status = $("#lm");
+    if (!navigator.geolocation) {
+      loc = null;
+      status.textContent = "المتصفح لا يدعم تحديد الموقع. جرّب متصفحاً حديثاً واسمح بخدمة الموقع.";
+      return;
+    }
+    t.disabled = true;
+    t.textContent = "جارٍ تحديد موقعك...";
+    status.textContent = "نطلب موقع GPS بدقة عالية. وافق على رسالة الموقع التي سيعرضها المتصفح.";
+    navigator.geolocation.getCurrentPosition(p => {
+      const lat = Number(p.coords.latitude.toFixed(6));
+      const lng = Number(p.coords.longitude.toFixed(6));
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        loc = null;
+        status.textContent = "تعذر قراءة الإحداثيات. حاول مرة أخرى.";
+      } else {
+        loc = { lat, lng, accuracy: Math.round(p.coords.accuracy || 0) };
+        status.textContent = `تم تحديد الموقع وحفظه ✓ (دقة تقريبية ${loc.accuracy} متر) — ${lat}, ${lng}`;
+        t.textContent = "✓ تم تحديد الموقع — تحديث";
+      }
+      t.disabled = false;
+    }, error => {
+      loc = null;
+      const reason = error.code === 1 ? "رفضت إذن الموقع. افتح إعدادات الموقع في المتصفح واسمح للموقع." :
+        error.code === 2 ? "الجهاز لم يستطع تحديد الموقع. فعّل GPS وحاول قرب نافذة أو في مكان مفتوح." :
+        "انتهت مهلة تحديد الموقع. حاول مرة أخرى.";
+      status.textContent = reason;
+      t.textContent = "📍 حاول تحديد موقعي مرة أخرى";
+      t.disabled = false;
+    }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  }
   else if (t.id === "go") submit(); else if (t.id === "x") close();
 });
 $("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") close(); });
