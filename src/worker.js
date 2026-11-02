@@ -209,17 +209,116 @@ async function retry(env) {
   for (const r of rows) { const [o, items] = await rowToOrder(env, r); await sendOrder(env, r.id, o, items); }
 }
 
+async function editOrderTelegramMessage(env, row, chatId = env.CHAT_ID, messageId = row.tg_message_id) {
+  const [o, items] = await rowToOrder(env, row);
+  await tg(env, "editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text: text(o, items, env),
+    reply_markup: orderKeyboard(o, row.status, items, env),
+    disable_web_page_preview: true
+  });
+}
+async function changeOrderStatus(env, row, to, uid, reason = null, chatId = env.CHAT_ID, messageId = row.tg_message_id) {
+  if (!(NEXT[row.status] || []).includes(to)) return { ok: false, message: "الحالة اتغيّرت بالفعل" };
+  const result = await env.DB.prepare(
+    `UPDATE orders SET status=?, cancel_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancel_reason END, confirmed_by=CASE WHEN ?='confirmed' THEN ? ELSE confirmed_by END, updated_at=${NOW} WHERE id=? AND status=?`
+  ).bind(to, to, reason, to, uid, row.id, row.status).run();
+  if (!result.meta.changes) return { ok: false, message: "الحالة اتغيّرت بالفعل من موظف آخر" };
+  await env.DB.prepare("INSERT INTO order_events(order_id,event,by_telegram_id) VALUES(?,?,?)")
+    .bind(row.id, to, uid).run();
+  const refreshed = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(row.id).first();
+  if (refreshed) await editOrderTelegramMessage(env, refreshed, chatId, messageId);
+  return { ok: true, message: ST[to] || to };
+}
 async function onButton(q, env) {
   const ans = (t, alert = false) => tg(env, "answerCallbackQuery", { callback_query_id: q.id, text: t, show_alert: alert });
-  const [, sid, to] = String(q.data || "").split(":"), id = Number(sid), uid = q.from.id;
-  if (!(await isStaff(env, uid))) return ans("مش مسموح لك", true);
-  const cur = await env.DB.prepare("SELECT status FROM orders WHERE id=?").bind(id).first();
-  if (!cur || !(NEXT[cur.status] || []).includes(to)) return ans("الحالة اتغيّرت بالفعل");
-  const up = await env.DB.prepare(`UPDATE orders SET status=?, confirmed_by=CASE WHEN ?='confirmed' THEN ? ELSE confirmed_by END, updated_at=${NOW} WHERE id=? AND status=?`).bind(to, to, uid, id, cur.status).run();
-  if (!up.meta.changes) return ans("اتغيّرت بالفعل من حد تاني");
-  await env.DB.prepare("INSERT INTO order_events(order_id,event,by_telegram_id) VALUES(?,?,?)").bind(id, to, uid).run();
-  await tg(env, "editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: `${q.message.text}\n📌 ${ST[to]} — ${q.from.first_name}`, reply_markup: kb(id, to), disable_web_page_preview: true });
-  return ans(ST[to]);
+  try {
+    const [kind, sid, action] = String(q.data || "").split(":");
+    const id = Number(sid), uid = q.from?.id;
+    if (!Number.isSafeInteger(id) || id < 1) return ans("رقم الطلب غير صالح", true);
+    if (!(await isStaff(env, uid))) return ans("مش مسموح لك", true);
+
+    const row = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(id).first();
+    if (!row) return ans("الطلب غير موجود", true);
+
+    if (kind === "c" && action === "open") {
+      await tg(env, "editMessageReplyMarkup", {
+        chat_id: q.message.chat.id,
+        message_id: q.message.message_id,
+        reply_markup: { inline_keyboard: [
+          [
+            { text: "العميل طلب الإلغاء", callback_data: `c:${id}:customer` },
+            { text: "العميل لا يرد", callback_data: `c:${id}:no_answer` }
+          ],
+          [
+            { text: "العنوان غير واضح", callback_data: `c:${id}:address` },
+            { text: "سبب آخر", callback_data: `c:${id}:other` }
+          ],
+          [{ text: "رجوع", callback_data: `c:${id}:back` }]
+        ] }
+      });
+      return ans("اختر سبب الإلغاء");
+    }
+
+    if (kind === "c" && action === "back") {
+      const [o, items] = await rowToOrder(env, row);
+      await tg(env, "editMessageReplyMarkup", {
+        chat_id: q.message.chat.id,
+        message_id: q.message.message_id,
+        reply_markup: orderKeyboard(o, row.status, items, env)
+      });
+      return ans("تم الرجوع");
+    }
+
+    if (kind === "c" && action === "other") {
+      await tg(env, "sendMessage", {
+        chat_id: env.CHAT_ID,
+        text: `اكتب سبب إلغاء الطلب #${row.code} بالرد على هذه الرسالة.`,
+        reply_to_message_id: q.message.message_id,
+        reply_markup: { force_reply: true, selective: true, input_field_placeholder: "اكتب سبب الإلغاء" }
+      });
+      return ans("اكتب السبب في رسالة رد");
+    }
+
+    if (kind === "c" && Object.hasOwn(CANCEL_REASONS, action)) {
+      const result = await changeOrderStatus(env, row, "cancelled", uid, CANCEL_REASONS[action], q.message.chat.id, q.message.message_id);
+      return ans(result.message, !result.ok);
+    }
+
+    if (kind === "s" && ["confirmed", "out_for_delivery", "delivered"].includes(action)) {
+      const result = await changeOrderStatus(env, row, action, uid, null, q.message.chat.id, q.message.message_id);
+      return ans(result.message, !result.ok);
+    }
+
+    return ans("الإجراء غير معروف", true);
+  } catch (error) {
+    console.error("Telegram callback failed:", error);
+    return ans("تعذر تنفيذ الإجراء. حاول مرة أخرى أو راجع سجلات Worker.", true);
+  }
+}
+async function onCancelReasonReply(m, env) {
+  const prompt = String(m.reply_to_message?.text || "");
+  const match = prompt.match(/^اكتب سبب إلغاء الطلب #([A-Z0-9-]+)/);
+  if (!match) return false;
+  if (!(await isStaff(env, m.from?.id))) return true;
+  const reason = String(m.text || "").trim().slice(0, 200);
+  if (reason.length < 3) {
+    await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: "اكتب سبباً أوضح (3 أحرف على الأقل).", reply_to_message_id: m.message_id });
+    return true;
+  }
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE code=?").bind(match[1]).first();
+  if (!row) {
+    await tg(env, "sendMessage", { chat_id: env.CHAT_ID, text: "الطلب غير موجود.", reply_to_message_id: m.message_id });
+    return true;
+  }
+  const result = await changeOrderStatus(env, row, "cancelled", m.from.id, reason);
+  await tg(env, "sendMessage", {
+    chat_id: env.CHAT_ID,
+    text: result.ok ? `تم إلغاء ${row.code}. السبب: ${reason}` : result.message,
+    reply_to_message_id: m.message_id
+  });
+  return true;
 }
 
 async function onCommand(m, env) {
@@ -257,19 +356,30 @@ async function hook(req, env) {
       } else {
         await onButton(u.callback_query, env);
       }
-    } else if (u.message?.text?.startsWith("/")) {
+    } else if (u.message) {
       const m = u.message;
-      const command = m.text.trim().split(/\s+/)[0].split("@")[0];
-      const publicMyIdLookup = command === "/myid";
-      const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
-      if (publicMyIdLookup || ownerChatIdLookup || (adminChat && String(m.chat?.id) === adminChat)) {
-        await onCommand(m, env);
+      const actualChat = String(m.chat?.id ?? "");
+      if (m.text?.startsWith("/")) {
+        const command = m.text.trim().split(/\\s+/)[0].split("@")[0];
+        const publicMyIdLookup = command === "/myid";
+        const ownerChatIdLookup = command === "/chatid" && isOwner(env, m.from?.id);
+        if (publicMyIdLookup || ownerChatIdLookup || (adminChat && actualChat === adminChat)) await onCommand(m, env);
+      } else if (adminChat && actualChat === adminChat && m.reply_to_message) {
+        await onCancelReasonReply(m, env);
       }
     }
-  } catch (e) { console.error(e); }
+  } catch (error) {
+    console.error("Telegram webhook update failed:", error);
+    if (u.callback_query?.id) {
+      await tg(env, "answerCallbackQuery", {
+        callback_query_id: u.callback_query.id,
+        text: "حصل خطأ أثناء تنفيذ الإجراء. حاول مرة أخرى.",
+        show_alert: true
+      });
+    }
+  }
   return new Response("ok");
 }
-
 export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
