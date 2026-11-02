@@ -331,6 +331,35 @@ async function onCommand(m, env) {
   if (t === "/myid") return rep(`رقمك: ${uid}`);
   // يسمح للمالك فقط بمعرفة معرّف مجموعة الاختبار من دون كشفه في السجلات أو المحادثات.
   if (t === "/chatid" && isOwner(env, uid)) return rep(`معرّف المجموعة: ${m.chat.id}`);
+  if (t === "/fixbuttons") {
+    if (!isOwner(env, uid)) return rep("الأمر ده متاح لمالك البوت فقط.");
+    if (!env.BOT_TOKEN || !env.WEBHOOK_SECRET) return rep("إعدادات Telegram غير مكتملة في Cloudflare.");
+    const webhookUrl = "https://qeshta2-orders.qeshta.workers.dev/api/tg";
+    const registration = await tg(env, "setWebhook", {
+      url: webhookUrl,
+      secret_token: env.WEBHOOK_SECRET,
+      allowed_updates: ["message", "callback_query"],
+      drop_pending_updates: false
+    });
+    if (!registration.ok) {
+      console.error("Telegram setWebhook failed", registration.description || "unknown error");
+      return rep("تعذر تحديث Webhook. راجع سجل Worker ثم حاول مرة أخرى.");
+    }
+    const info = await tg(env, "getWebhookInfo", {});
+    if (!info.ok) return rep("تم إرسال إعداد Webhook، لكن تعذر قراءة حالة التحقق.");
+    const currentUrl = String(info.result?.url || "");
+    const updates = Array.isArray(info.result?.allowed_updates) ? info.result.allowed_updates : [];
+    const callbackEnabled = updates.includes("callback_query");
+    const urlMatches = currentUrl === webhookUrl;
+    const lastError = info.result?.last_error_message;
+    return rep([
+      urlMatches && callbackEnabled ? "✅ تم إصلاح استقبال أزرار Telegram." : "⚠️ تم تحديث Webhook لكن التحقق غير مكتمل.",
+      `العنوان: ${urlMatches ? "صحيح" : "غير مطابق"}`,
+      `callback_query: ${callbackEnabled ? "مفعّل" : "غير مفعّل"}`,
+      `الرسائل المعلقة: ${Number(info.result?.pending_update_count || 0)}`,
+      ...(lastError ? [`آخر خطأ من Telegram: ${String(lastError).slice(0, 300)}`] : [])
+    ].join("\\n"));
+  }
   if (!(await isStaff(env, uid))) return;
   if (t === "/pending") {
     const p = Math.max(1, Number(arg) || 1);
