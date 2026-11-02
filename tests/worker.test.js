@@ -56,13 +56,18 @@ test("أزرار الطلب تعمل لأي عضو داخل جروب المطب�
   await tgHook(env, outsider);
   assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
 });
-test("إضافة موظف بالرد وحذفه (المالك فقط)", async () => {
+test("أوامر إدارة الموظفين تظل للمالك، لكن أزرار الطلب لكل أعضاء الجروب", async () => {
   const env = mkEnv(); await post(env, "/api/order", ok);
   const add = (uid) => ({ message: { text: "/addstaff", from: { id: uid }, chat: { id: -100 }, message_id: 1, reply_to_message: { from: { id: 555, first_name: "علي", is_bot: false } } } });
   await tgHook(env, add(999)); assert.equal(env.db.prepare("SELECT COUNT(*) c FROM staff").get().c, 0);
-  await tgHook(env, add(6681233049)); await tgHook(env, press(555, "confirmed")); assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "confirmed");
-  await tgHook(env, { message: { text: "/removestaff 555", from: { id: 6681233049 }, chat: { id: -100 }, message_id: 2 } }); sent.length = 0; await tgHook(env, press(555, "out_for_delivery"));
-  assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "مش مسموح لك");
+  await tgHook(env, add(6681233049)); await tgHook(env, press(555, "confirmed"));
+  assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "confirmed");
+  await tgHook(env, { message: { text: "/removestaff 555", from: { id: 6681233049 }, chat: { id: -100 }, message_id: 2 } });
+  sent.length = 0;
+  await tgHook(env, { message: { text: "/pending", from: { id: 555 }, chat: { id: -100 }, message_id: 3 } });
+  assert.equal(sent.filter(x => x.u === "sendMessage").length, 0, "أوامر الإدارة تظل محمية بعد حذف الموظف");
+  await tgHook(env, press(555, "out_for_delivery"));
+  assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "out_for_delivery", "عضو الجروب يظل قادراً على إدارة الطلب");
 });
 
 test("تقييد أوامر الإدارة والأزرار على جروب الإدارة مع إتاحة /chatid للمالك", async () => {
