@@ -8,7 +8,7 @@ function mkEnv() {
 }
 const sent = []; globalThis.fetch = async (u, i) => { const b = i?.body && typeof i.body === "string" ? JSON.parse(i.body) : {}; sent.push({ u: String(u).split("/").pop(), b }); return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) }; };
 const post = (env, path, body, h = {}) => worker.fetch(new Request("https://x" + path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) }), env);
-const ok = { idem: "idem-test-0001", name: "أحمد محمد", phone: "01012345678", address: "شارع النصر", pay: "cash", lines: [{ id: "c01", amount: 120, qty: 1, note: "" }, { id: "cf10", qty: 2 }] };
+const ok = { idem: "idem-test-0001", name: "أحمد محمد", phone: "01012345678", address: "شارع النصر", lat: 30.1, lng: 31.2, pay: "cash", lines: [{ id: "c01", amount: 120, qty: 1, note: "" }, { id: "cf10", qty: 2 }] };
 const tgHook = (env, upd, secret = "sec") => post(env, "/api/tg", upd, { "x-telegram-bot-api-secret-token": secret });
 const press = (uid, to, id = 1) => ({ callback_query: { id: "q", data: `s:${id}:${to}`, from: { id: uid, first_name: "س" }, message: { chat: { id: -100 }, message_id: 42, text: "طلب" } } });
 
@@ -109,8 +109,8 @@ test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات"
 
 test("رفض الطلب بدون إحداثيات أو بإحداثيات غير صالحة", async () => {
   const env = mkEnv();
-  const missing = { ...ok, address: "عنوان مكتوب فقط" };
-  const partial = { ...ok, address: "", lat: 30.1 };
+  const missing = { ...ok, address: "عنوان مكتوب فقط", lat: undefined, lng: undefined };
+  const partial = { ...ok, address: "", lat: 30.1, lng: undefined };
   const invalid = { ...ok, address: "", lat: 300, lng: 31 };
   assert.equal((await post(env, "/api/order", { ...missing, idem: "coords-missing-01" })).status, 400);
   assert.equal((await post(env, "/api/order", { ...partial, idem: "coords-0001" })).status, 400);
