@@ -28,13 +28,33 @@ test("رفض: تليفون غلط، سعر معدّل، اسم أحادي، سل
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
 });
 test("الحقل المخفي: لا طلب ولا رسالة", async () => { const env = mkEnv(); sent.length = 0; await post(env, "/api/order", { ...ok, hp: "x" }); assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0); assert.equal(sent.length, 0); });
-test("الـ webhook: رفض بدون السر، ومنع غير الموظفين، والمالك يؤكد، والضغط المكرر", async () => {
-  const env = mkEnv(); await post(env, "/api/order", ok); sent.length = 0;
+test("أزرار الطلب تعمل لأي عضو داخل جروب المطبخ فقط", async () => {
+  const env = mkEnv();
+  const locatedOrder = { ...ok, lat: 30.1, lng: 31.2 };
+  await post(env, "/api/order", locatedOrder);
+  sent.length = 0;
   assert.equal((await tgHook(env, press(1, "confirmed"), "bad")).status, 401);
-  await tgHook(env, press(999, "confirmed")); assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "مش مسموح لك"); assert.equal(env.db.prepare("SELECT status FROM orders").get().status, "new");
-  await tgHook(env, press(6681233049, "confirmed")); assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().confirmed_by, 6681233049);
-  sent.length = 0; await tgHook(env, press(6681233049, "confirmed")); assert.match(sent.find(x => x.u === "answerCallbackQuery").b.text, /اتغيّرت/);
-  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='confirmed'").get().c, 1);
+
+  // A normal kitchen-group member (not OWNER_IDS and not in staff) can confirm.
+  await tgHook(env, press(999, "confirmed"));
+  assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().status, "confirmed");
+  assert.equal(env.db.prepare("SELECT status,confirmed_by FROM orders").get().confirmed_by, 999);
+  assert.ok(sent.some(x => x.u === "answerCallbackQuery" && x.b.text === "تم التأكيد"));
+
+  // The same member can cancel from the configured kitchen group.
+  const cancel = press(999, "cancelled");
+  cancel.callback_query.data = "c:1:no_answer";
+  await tgHook(env, cancel);
+  const row = env.db.prepare("SELECT status,cancel_reason FROM orders").get();
+  assert.equal(row.status, "cancelled");
+  assert.equal(row.cancel_reason, "العميل لا يرد");
+
+  // Callback queries from a different chat are still rejected by hook().
+  sent.length = 0;
+  const outsider = press(999, "confirmed");
+  outsider.callback_query.message.chat.id = -200;
+  await tgHook(env, outsider);
+  assert.equal(sent.find(x => x.u === "answerCallbackQuery").b.text, "المجموعة غير معتمدة");
 });
 test("إضافة موظف بالرد وحذفه (المالك فقط)", async () => {
   const env = mkEnv(); await post(env, "/api/order", ok);
@@ -87,13 +107,28 @@ test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات"
   assert.equal(sent.filter(x => x.u === "sendMessage").length, 1);
 });
 
-test("رفض الإحداثيات الناقصة أو خارج النطاق", async () => {
+test("رفض الطلب بدون إحداثيات أو بإحداثيات غير صالحة", async () => {
   const env = mkEnv();
+  const missing = { ...ok, address: "عنوان مكتوب فقط" };
   const partial = { ...ok, address: "", lat: 30.1 };
   const invalid = { ...ok, address: "", lat: 300, lng: 31 };
+  assert.equal((await post(env, "/api/order", { ...missing, idem: "coords-missing-01" })).status, 400);
   assert.equal((await post(env, "/api/order", { ...partial, idem: "coords-0001" })).status, 400);
   assert.equal((await post(env, "/api/order", { ...invalid, idem: "coords-0002" })).status, 400);
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("حفظ إحداثيات الموقع الدقيق في D1 وإظهار أزرار الخرائط", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "coords-save-0001", lat: 30.123456, lng: 31.654321 });
+  const row = env.db.prepare("SELECT lat,lng FROM orders WHERE idem_key=?").get("coords-save-0001");
+  assert.equal(row.lat, 30.123456);
+  assert.equal(row.lng, 31.654321);
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  assert.ok(msg.text.includes("30.123456, 31.654321"));
+  const buttons = msg.reply_markup.inline_keyboard.flat();
+  assert.ok(buttons.some(x => x.text === "📍 Google Maps"));
+  assert.ok(buttons.some(x => x.text === "🍎 Apple Maps"));
 });
 
 test("تنظيف سجل الطلب إذا فشل حفظ تفاصيله في D1", async () => {
@@ -218,4 +253,13 @@ test("طلب المحفظة يحذر المطبخ إذا لم يتم ضبط رق
   assert.ok(message.includes("رقم المحفظة غير مضبوط"));
   const buttons = sent.find(x => x.u === "sendMessage").b.reply_markup.inline_keyboard.flat();
   assert.equal(buttons.some(x => x.text === "💳 نسخ رقم المحفظة"), false);
+});
+
+test("الواجهة تطلب GPS بدقة عالية ولا ترسل الطلب بدون موقع", async () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.ok(html.includes("enableHighAccuracy: true"));
+  assert.ok(html.includes("timeout: 25000"));
+  assert.ok(html.includes('if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng))'));
+  assert.ok(html.includes("navigator.geolocation.getCurrentPosition"));
+  assert.ok(html.includes("lat: loc.lat, lng: loc.lng"));
 });
