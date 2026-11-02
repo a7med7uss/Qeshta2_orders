@@ -242,7 +242,7 @@ async function onButton(q, env) {
     const row = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(id).first();
     if (!row) return ans("الطلب غير موجود", true);
 
-    if (kind === "c" && action === "open") {
+    if ((kind === "c" && action === "open") || (kind === "s" && action === "cancelled")) {
       await tg(env, "editMessageReplyMarkup", {
         chat_id: q.message.chat.id,
         message_id: q.message.message_id,
