@@ -59,16 +59,140 @@ function orderWhatsAppMessage(o, items, env) {
   lines.push("", "شكراً لطلبك من قشطة.");
   return lines.join("\n");
 }
-function orderKeyboard(o, status, items, env) {
+const ORDER_ACTION_BASE = "https://qeshta2-orders.qeshta.workers.dev";
+const ORDER_ACTION_TTL_SECONDS = 30 * 24 * 60 * 60;
+const actionEncoder = new TextEncoder();
+
+function encodeBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function decodeBase64Url(value) {
+  const base64 = String(value).replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+async function orderActionKey(env) {
+  if (!env.WEBHOOK_SECRET) throw new Error("Order action signing key is not configured");
+  return crypto.subtle.importKey("raw", actionEncoder.encode(env.WEBHOOK_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+async function createOrderActionToken(env, id, action) {
+  if (!["confirmed", "cancelled", "revive"].includes(action)) throw new Error("Invalid order action");
+  const payload = encodeBase64Url(actionEncoder.encode(JSON.stringify({
+    id: Number(id), action, exp: Math.floor(Date.now() / 1000) + ORDER_ACTION_TTL_SECONDS
+  })));
+  const key = await orderActionKey(env);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, actionEncoder.encode(payload)));
+  return payload + "." + encodeBase64Url(signature);
+}
+async function verifyOrderActionToken(env, token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const key = await orderActionKey(env);
+    const valid = await crypto.subtle.verify("HMAC", key, decodeBase64Url(parts[1]), actionEncoder.encode(parts[0]));
+    if (!valid) return null;
+    const value = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[0])));
+    if (!Number.isSafeInteger(value.id) || value.id < 1 ||
+        !["confirmed", "cancelled", "revive"].includes(value.action) ||
+        !Number.isSafeInteger(value.exp) || value.exp < Math.floor(Date.now() / 1000)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+async function orderActionUrl(env, id, action) {
+  const token = await createOrderActionToken(env, id, action);
+  return ORDER_ACTION_BASE + "/api/order-action?t=" + encodeURIComponent(token);
+}
+function orderActionHtml(title, message, token, action, status) {
+  const safe = value => String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const labels = {
+    confirmed: ["تأكيد الطلب", "هل أنت متأكد أنك تريد تأكيد هذا الطلب؟", "نعم، تأكيد الطلب"],
+    cancelled: ["إلغاء الطلب", "هل أنت متأكد أنك تريد إلغاء هذا الطلب؟", "نعم، إلغاء الطلب"],
+    revive: ["إعادة إحياء الطلب", "هل تريد إعادة هذا الطلب إلى قائمة الطلبات الجديدة؟", "نعم، إعادة إحياء الطلب"]
+  };
+  const choice = labels[action];
+  const form = choice
+    ? '<p class="question">' + choice[1] + '</p><form method="POST" action="/api/order-action">' +
+      '<input type="hidden" name="token" value="' + safe(token) + '">' +
+      '<button class="yes" type="submit" name="decision" value="yes">' + choice[2] + '</button>' +
+      '<button class="no" type="submit" name="decision" value="no">لا، تراجع</button></form>'
+    : "";
+  const html = '<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">' +
+    '<title>' + safe(title) + ' - قشطة</title><style>' +
+    '*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#17100d;color:#fff;font-family:Arial,Tahoma,sans-serif;padding:20px}' +
+    'main{width:min(100%,440px);background:#241914;border:1px solid #594033;border-radius:22px;padding:26px;box-shadow:0 18px 60px #0008}' +
+    'h1{font-size:23px;margin:0 0 14px}.msg{color:#e8d8cb;line-height:1.9;margin:0 0 22px}.question{font-size:19px;line-height:1.8}' +
+    'button{width:100%;border:0;border-radius:14px;padding:15px;margin-top:10px;font-size:17px;font-weight:bold;cursor:pointer}' +
+    '.yes{background:#e94a13;color:white}.no{background:#3b2c25;color:white}small{color:#bba99c}</style></head><body><main>' +
+    '<h1>' + safe(title) + '</h1><p class="msg">' + safe(message) + '</p>' + form +
+    '<small>قشطة — إدارة الطلبات</small></main></body></html>';
+  return new Response(html, { status: status || 200, headers: {
+    "content-type": "text/html; charset=UTF-8",
+    "cache-control": "no-store, max-age=0",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+  }});
+}
+async function handleOrderAction(req, env) {
+  if (req.method !== "GET" && req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+  let token = "";
+  let decision = "";
+  if (req.method === "GET") token = new URL(req.url).searchParams.get("t") || "";
+  else {
+    if (req.headers.get("origin") !== ORDER_ACTION_BASE)
+      return orderActionHtml("تعذر تنفيذ الإجراء", "افتح الزر من رسالة الطلب داخل Telegram ثم حاول مرة أخرى.", "", "", 403);
+    const form = await req.formData().catch(() => null);
+    token = String(form && form.get("token") || "");
+    decision = String(form && form.get("decision") || "");
+  }
+  const payload = await verifyOrderActionToken(env, token);
+  if (!payload) return orderActionHtml("الرابط غير صالح", "انتهت صلاحية الرابط أو أنه غير صحيح. اطلب تحديث أزرار الطلب من مسؤول النظام.", "", "", 403);
+  const row = await env.DB.prepare("SELECT * FROM orders WHERE id=?").bind(payload.id).first();
+  if (!row) return orderActionHtml("الطلب غير موجود", "لم يتم العثور على الطلب في قاعدة البيانات.", "", "", 404);
+  const allowed = payload.action === "revive" ? row.status === "cancelled" : row.status === "new";
+  if (!allowed) return orderActionHtml("تم تحديث الطلب بالفعل", "الحالة الحالية للطلب هي: " + (ST[row.status] || row.status) + ".", "", "", 409);
+  if (req.method === "GET") {
+    const labels = {
+      confirmed: ["تأكيد الطلب", "الطلب " + row.code + " جاهز للتأكيد."],
+      cancelled: ["إلغاء الطلب", "الطلب " + row.code + " سيتم إلغاؤه."],
+      revive: ["إعادة إحياء الطلب", "الطلب " + row.code + " سيعود إلى الطلبات الجديدة."]
+    };
+    return orderActionHtml(labels[payload.action][0], labels[payload.action][1], token, payload.action, 200);
+  }
+  if (decision !== "yes" && decision !== "no")
+    return orderActionHtml("اختيار غير صالح", "لم يتم تغيير حالة الطلب.", "", "", 400);
+  if (decision === "no")
+    return orderActionHtml("لم يتم تغيير الطلب", "تم التراجع. حالة الطلب لم تتغير، ويمكنك الرجوع إلى Telegram.", "", "", 200);
+
+  const result = payload.action === "revive"
+    ? await reviveOrder(env, row, null, env.CHAT_ID, row.tg_message_id)
+    : await changeOrderStatus(env, row, payload.action, null, env.CHAT_ID, row.tg_message_id);
+  if (!result.ok) return orderActionHtml("لم يتم تنفيذ الإجراء", result.message, "", "", 409);
+  if (!result.messageUpdated)
+    return orderActionHtml("تم تحديث قاعدة البيانات", result.message + ". لكن تعذر تحديث رسالة Telegram؛ استخدم /refreshorder من الجروب لمزامنتها.", "", "", 502);
+  return orderActionHtml("تم بنجاح", result.message + ". تم تحديث قاعدة البيانات ورسالة الطلب في Telegram.", "", "", 200);
+}
+async function orderKeyboard(o, status, items, env) {
   if (status === "cancelled") {
-    return { inline_keyboard: [[{ text: "♻️ إعادة إحياء الطلب", callback_data: `revive:${o.id}:now` }]] };
+    return { inline_keyboard: [[{ text: "♻️ إعادة إحياء الطلب", url: await orderActionUrl(env, o.id, "revive") }]] };
   }
   // Once confirmed, all inline actions are removed from the message.
   if (status !== "new") return { inline_keyboard: [] };
 
+  const [confirmUrl, cancelUrl] = await Promise.all([
+    orderActionUrl(env, o.id, "confirmed"),
+    orderActionUrl(env, o.id, "cancelled")
+  ]);
   const rows = [[
-    { text: "✅ تأكيد الطلب", callback_data: `ask:${o.id}:confirmed` },
-    { text: "❌ إلغاء الطلب", callback_data: `ask:${o.id}:cancelled` }
+    { text: "✅ تأكيد الطلب", url: confirmUrl },
+    { text: "❌ إلغاء الطلب", url: cancelUrl }
   ]];
 
   const phone = String(o.phone || "").replace(/[\s-]/g, "");
@@ -133,7 +257,7 @@ async function sendOrder(env, id, o, items) {
   const r = await tg(env, "sendMessage", {
     chat_id: env.CHAT_ID,
     text: text({ ...o, id }, items, env),
-    reply_markup: orderKeyboard({ ...o, id }, "new", items, env),
+    reply_markup: await orderKeyboard({ ...o, id }, "new", items, env),
     disable_web_page_preview: true
   });
   if (id && env.DB) await env.DB.prepare("UPDATE orders SET tg_attempts=tg_attempts+1, tg_sent=?, tg_message_id=? WHERE id=?").bind(r.ok ? 1 : 0, r.result?.message_id ?? null, id).run().catch(() => {});
@@ -156,8 +280,7 @@ async function order(req, env) {
   if (name.split(" ").length < 2 || name.length > 60) return J({ error: "اكتب الاسم الثنائي" }, 400);
   if (!/^01[0125]\d{8}$/.test(phone)) return J({ error: "رقم الموبايل غير صحيح" }, 400);
   if ((b.lat != null || b.lng != null) && !hasCoordinates) return J({ error: "الموقع الجغرافي غير صالح" }, 400);
-  if (!hasCoordinates) return J({ error: "حدد موقعك الدقيق من زر تحديد الموقع قبل تأكيد الطلب" }, 400);
-  if (!address && !hasCoordinates) return J({ error: "حدد العنوان أو موقعك" }, 400);
+  if (!address && !hasCoordinates) return J({ error: "من فضلك اكتب العنوان بالتفصيل أو حدد موقعك من زر تحديد الموقع." }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (b.pay === "instapay") return J({ error: "InstaPay غير متاح حالياً. اختر الدفع عند الاستلام أو فودافون كاش." }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
@@ -217,7 +340,7 @@ async function editOrderTelegramMessage(env, row, chatId = env.CHAT_ID, messageI
     chat_id: chatId,
     message_id: messageId,
     text: text(o, items, env),
-    reply_markup: orderKeyboard(o, row.status, items, env),
+    reply_markup: await orderKeyboard(o, row.status, items, env),
     disable_web_page_preview: true
   });
   return !!result.ok;
@@ -331,6 +454,16 @@ async function onCommand(m, env) {
   if (t === "/myid") return rep(`رقمك: ${uid}`);
   // يسمح للمالك فقط بمعرفة معرّف مجموعة الاختبار من دون كشفه في السجلات أو المحادثات.
   if (t === "/chatid" && isOwner(env, uid)) return rep(`معرّف المجموعة: ${m.chat.id}`);
+  if (t === "/refreshorder") {
+    if (!isOwner(env, uid)) return rep("الأمر ده متاح لمالك البوت فقط.");
+    const ref = String(arg || "").trim().toUpperCase();
+    if (!ref) return rep("استخدم الأمر هكذا: /refreshorder QST-0007");
+    const row = await env.DB.prepare("SELECT * FROM orders WHERE code=? OR CAST(id AS TEXT)=?").bind(ref, ref).first();
+    if (!row) return rep("لم أجد الطلب. تأكد من رقم QST.");
+    if (!row.tg_message_id) return rep("الطلب لا يحتوي على رسالة Telegram محفوظة.");
+    const updated = await editOrderTelegramMessage(env, row, m.chat.id, row.tg_message_id);
+    return rep(updated ? "تم تحديث أزرار ورسالة الطلب " + row.code + "." : "تعذر تحديث الرسالة. راجع سجلات Worker.");
+  }
   if (t === "/fixbuttons") {
     if (!isOwner(env, uid)) return rep("الأمر ده متاح لمالك البوت فقط.");
     if (!env.BOT_TOKEN || !env.WEBHOOK_SECRET) return rep("إعدادات Telegram غير مكتملة في Cloudflare.");
@@ -416,6 +549,7 @@ export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
     if (p === "/api/order" && req.method === "POST") return order(req, env);
+    if (p === "/api/order-action") return handleOrderAction(req, env);
     if (p === "/api/tg" && req.method === "POST") return hook(req, env);
     if (p.startsWith("/api/")) return J({ error: "not found" }, 404);
     return env.ASSETS.fetch(req);
