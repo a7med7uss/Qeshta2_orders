@@ -5,7 +5,6 @@ const J = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: 
 const PAY = { cash: "الدفع عند الاستلام", wallet: "محفظة", instapay: "إنستا (غير متاح)" };
 const ST = { new: "طلب جديد", confirmed: "تم التأكيد", out_for_delivery: "خرج للتوصيل", delivered: "تم التسليم", cancelled: "تم الإلغاء" };
 const NEXT = { new: ["confirmed", "cancelled"], confirmed: ["out_for_delivery", "cancelled"], out_for_delivery: ["delivered", "cancelled"] };
-const BTN = { confirmed: "✅ تم التأكيد", out_for_delivery: "🚚 خرج للتوصيل", delivered: "✔️ تم التسليم" };
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 const tg = (env, m, b) => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${m}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json()).catch(() => ({ ok: false }));
 const owners = env => String(env.OWNER_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -72,7 +71,7 @@ function orderKeyboard(o, status, items, env) {
     { text: "❌ إلغاء الطلب", callback_data: `ask:${o.id}:cancelled` }
   ]];
 
-  const phone = String(o.phone || "").replace(/[\\s-]/g, "");
+  const phone = String(o.phone || "").replace(/[\s-]/g, "");
   const contactRow = [];
   if (phone) contactRow.push({ text: "📋 نسخ رقم العميل", copy_text: { text: phone.slice(0, 256) } });
   const wa = whatsappUrl(phone, orderWhatsAppMessage(o, items, env));
