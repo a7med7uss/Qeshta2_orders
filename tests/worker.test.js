@@ -64,7 +64,7 @@ test("أي عضو في جروب المطبخ يؤكد بعد موافقة صري
   await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-no", data: "no:1:confirmed" } });
   assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
   const restored = sent.filter(x => x.u === "editMessageText").at(-1);
-  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:cancelled"));
+  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب" && x.url?.includes("/api/order-action")));
 
   // The same ordinary member confirms the order.
   await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:confirmed" } });
@@ -144,15 +144,29 @@ test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات"
   assert.equal(sent.filter(x => x.u === "sendMessage").length, 1);
 });
 
-test("رفض الطلب بدون إحداثيات أو بإحداثيات غير صالحة", async () => {
+test("العنوان المكتوب يكفي، والموقع الدقيق اختياري، والإحداثيات الجزئية ترفض", async () => {
   const env = mkEnv();
-  const missing = { ...ok, address: "عنوان مكتوب فقط", lat: undefined, lng: undefined };
+  const missing = { ...ok, address: "", lat: undefined, lng: undefined };
   const partial = { ...ok, address: "", lat: 30.1, lng: undefined };
   const invalid = { ...ok, address: "", lat: 300, lng: 31 };
   assert.equal((await post(env, "/api/order", { ...missing, idem: "coords-missing-01" })).status, 400);
   assert.equal((await post(env, "/api/order", { ...partial, idem: "coords-0001" })).status, 400);
   assert.equal((await post(env, "/api/order", { ...invalid, idem: "coords-0002" })).status, 400);
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+
+  sent.length = 0;
+  const addressOnly = { ...ok, idem: "address-only-0001", address: "شارع النصر بجوار المدرسة", lat: null, lng: null };
+  const response = await post(env, "/api/order", addressOnly);
+  assert.equal(response.status, 200);
+  const row = env.db.prepare("SELECT address_text,lat,lng FROM orders WHERE idem_key=?").get("address-only-0001");
+  assert.equal(row.address_text, "شارع النصر بجوار المدرسة");
+  assert.equal(row.lat, null);
+  assert.equal(row.lng, null);
+  const message = sent.find(x => x.u === "sendMessage").b;
+  assert.ok(message.text.includes("شارع النصر بجوار المدرسة"));
+  const buttons = message.reply_markup.inline_keyboard.flat();
+  assert.equal(buttons.some(x => x.text === "📍 Google Maps"), false);
+  assert.equal(buttons.some(x => x.text === "🍎 Apple Maps"), false);
 });
 
 test("حفظ إحداثيات الموقع الدقيق في D1 وإظهار أزرار الخرائط", async () => {
@@ -253,7 +267,7 @@ test("الإلغاء يتطلب تأكيداً، يزيل بقية الأزرا�
   await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-no", data: "no:1:cancelled" } });
   assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
   const restored = sent.filter(x => x.u === "editMessageText").at(-1);
-  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:confirmed"));
+  assert.ok(restored.b.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب" && x.url?.includes("/api/order-action")));
 
   // Yes cancels and removes every action except the single revive button.
   await tgHook(env, { callback_query: { ...ask.callback_query, id: "q-yes", data: "yes:1:cancelled" } });
@@ -273,7 +287,7 @@ test("الإلغاء يتطلب تأكيداً، يزيل بقية الأزرا�
   assert.equal(row.cancel_reason, null);
   assert.equal(row.confirmed_by, null);
   const revivedMessage = sent.filter(x => x.u === "editMessageText").at(-1);
-  assert.ok(revivedMessage.b.reply_markup.inline_keyboard.flat().some(x => x.callback_data === "ask:1:confirmed"));
+  assert.ok(revivedMessage.b.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب" && x.url?.includes("/api/order-action")));
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM order_events WHERE event='revived'").get().c, 1);
 });
 
@@ -317,13 +331,14 @@ test("طلب المحفظة يحذر المطبخ إذا لم يتم ضبط رق
   assert.equal(buttons.some(x => x.text === "💳 نسخ رقم المحفظة"), false);
 });
 
-test("الواجهة تطلب GPS بدقة عالية ولا ترسل الطلب بدون موقع", async () => {
+test("الواجهة تجعل GPS اختيارياً وتطلب عنواناً أو موقعاً واحداً على الأقل", async () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   assert.ok(html.includes("enableHighAccuracy: true"));
   assert.ok(html.includes("timeout: 25000"));
-  assert.ok(html.includes('if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng))'));
+  assert.ok(html.includes("تحديد الموقع الدقيق اختياري"));
+  assert.ok(html.includes("if (!address && !hasLocation)"));
+  assert.ok(html.includes("lat: hasLocation ? loc.lat : null"));
   assert.ok(html.includes("navigator.geolocation.getCurrentPosition"));
-  assert.ok(html.includes("lat: loc.lat, lng: loc.lng"));
 });
 
 test("إعادة رسم صفحة الدفع لا تمسح GPS المختار، ويمسح بعد نجاح الطلب", async () => {
@@ -380,4 +395,137 @@ test("أمر /fixbuttons يفعّل callback_query في Webhook للمالك ف�
   const reply = sent.filter(x => x.u === "sendMessage").at(-1);
   assert.ok(reply.b.text.includes("callback_query: مفعّل"));
   assert.ok(reply.b.text.includes("العنوان: صحيح"));
+});
+
+test("أزرار Telegram الجديدة تستخدم روابط موقعة ولا تعتمد على callback_query", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "signed-urls-0001" });
+  const message = sent.find(x => x.u === "sendMessage").b;
+  const buttons = message.reply_markup.inline_keyboard.flat();
+  const confirm = buttons.find(x => x.text === "✅ تأكيد الطلب");
+  const cancel = buttons.find(x => x.text === "❌ إلغاء الطلب");
+  assert.ok(confirm?.url?.startsWith("https://qeshta2-orders.qeshta.workers.dev/api/order-action?t="));
+  assert.ok(cancel?.url?.startsWith("https://qeshta2-orders.qeshta.workers.dev/api/order-action?t="));
+  assert.equal(confirm.callback_data, undefined);
+  assert.equal(cancel.callback_data, undefined);
+});
+
+test("رابط التأكيد يعرض صفحة نعم/تراجع ولا يغير D1 قبل الموافقة", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "signed-confirm-0001" });
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  const url = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "✅ تأكيد الطلب").url;
+  const view = await worker.fetch(new Request(url), env);
+  assert.equal(view.status, 200);
+  const html = await view.text();
+  assert.ok(html.includes("هل أنت متأكد"));
+  assert.ok(html.includes("لا، تراجع"));
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+
+  const token = new URL(url).searchParams.get("t");
+  const form = new FormData();
+  form.set("token", token);
+  form.set("decision", "no");
+  const no = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://qeshta2-orders.qeshta.workers.dev" }, body: form
+  }), env);
+  assert.equal(no.status, 200);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+});
+
+test("رابط التأكيد يحدّث D1 ورسالة Telegram بعد نعم ويمنع إعادة الاستخدام", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "signed-confirm-0002" });
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  const url = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "✅ تأكيد الطلب").url;
+  const token = new URL(url).searchParams.get("t");
+  const form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const response = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://qeshta2-orders.qeshta.workers.dev" }, body: form
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "confirmed");
+  const updated = sent.filter(x => x.u === "editMessageText").at(-1).b;
+  assert.ok(updated.text.includes("الحالة: تم التأكيد"));
+  assert.deepEqual(updated.reply_markup.inline_keyboard, []);
+
+  const replayForm = new FormData();
+  replayForm.set("token", token);
+  replayForm.set("decision", "yes");
+  const replay = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://qeshta2-orders.qeshta.workers.dev" }, body: replayForm
+  }), env);
+  assert.equal(replay.status, 409);
+});
+
+test("رابط الإلغاء ثم الإحياء يحدّث D1 ويغير لوحة Telegram", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "signed-cancel-0001" });
+  let msg = sent.find(x => x.u === "sendMessage").b;
+  let url = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "❌ إلغاء الطلب").url;
+  let token = new URL(url).searchParams.get("t");
+  let form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const cancel = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://qeshta2-orders.qeshta.workers.dev" }, body: form
+  }), env);
+  assert.equal(cancel.status, 200);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "cancelled");
+  msg = sent.filter(x => x.u === "editMessageText").at(-1).b;
+  assert.ok(msg.text.includes("الحالة: تم الإلغاء"));
+  const revive = msg.reply_markup.inline_keyboard.flat()[0];
+  assert.equal(revive.text, "♻️ إعادة إحياء الطلب");
+  assert.ok(revive.url.includes("/api/order-action?t="));
+
+  const revivePage = await worker.fetch(new Request(revive.url), env);
+  assert.ok((await revivePage.text()).includes("إعادة إحياء الطلب"));
+  token = new URL(revive.url).searchParams.get("t");
+  form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const resurrect = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://qeshta2-orders.qeshta.workers.dev" }, body: form
+  }), env);
+  assert.equal(resurrect.status, 200);
+  assert.equal(env.db.prepare("SELECT status,cancel_reason FROM orders WHERE id=1").get().status, "new");
+  msg = sent.filter(x => x.u === "editMessageText").at(-1).b;
+  assert.ok(msg.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب"));
+});
+
+test("رابط إجراء مزور أو POST من Origin خارجي لا يغير الطلب", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "signed-security-0001" });
+  const message = sent.find(x => x.u === "sendMessage").b;
+  const url = message.reply_markup.inline_keyboard.flat().find(x => x.text === "✅ تأكيد الطلب").url;
+  const token = new URL(url).searchParams.get("t");
+  const forged = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action?t=" + token.slice(0, -3) + "xyz"), env);
+  assert.equal(forged.status, 403);
+  const form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const csrf = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "https://evil.example" }, body: form
+  }), env);
+  assert.equal(csrf.status, 403);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
+});
+
+test("أمر /refreshorder يحدث أزرار الطلب القديم بدون تعديل D1", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "refresh-old-0001" });
+  sent.length = 0;
+  const command = { message: {
+    text: "/refreshorder QST-0001",
+    from: { id: 6681233049 },
+    chat: { id: -100 },
+    message_id: 78
+  } };
+  await tgHook(env, command);
+  const edited = sent.find(x => x.u === "editMessageText");
+  assert.ok(edited);
+  assert.ok(edited.b.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب" && x.url?.includes("/api/order-action")));
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
 });
