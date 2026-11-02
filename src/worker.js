@@ -146,7 +146,10 @@ async function handleOrderAction(req, env) {
   let decision = "";
   if (req.method === "GET") token = new URL(req.url).searchParams.get("t") || "";
   else {
-    if (req.headers.get("origin") !== ORDER_ACTION_BASE)
+    const origin = req.headers.get("origin") || (() => {
+      try { return new URL(req.headers.get("referer") || "").origin; } catch { return ""; }
+    })();
+    if (origin !== ORDER_ACTION_BASE)
       return orderActionHtml("تعذر تنفيذ الإجراء", "افتح الزر من رسالة الطلب داخل Telegram ثم حاول مرة أخرى.", "", "", 403);
     const form = await req.formData().catch(() => null);
     token = String(form && form.get("token") || "");
@@ -386,7 +389,7 @@ async function restoreOrderMessage(q, env, row) {
     chat_id: q.message.chat.id,
     message_id: q.message.message_id,
     text: text(o, items, env),
-    reply_markup: orderKeyboard(o, row.status, items, env),
+    reply_markup: await orderKeyboard(o, row.status, items, env),
     disable_web_page_preview: true
   });
   return !!result.ok;
