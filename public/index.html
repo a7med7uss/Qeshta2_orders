@@ -99,7 +99,7 @@ function openCheckout() {
   $("#pane").innerHTML = `<h3>طلبك</h3>${cart.map((l, i) => `<div class="line"><span>${m.get(l.id).name}${l.note ? " <small>(" + l.note + ")</small>" : ""}<br><small>${m.get(l.id).kind === "fixed" ? m.get(l.id).amount : l.amount || ""} ${l.amount || m.get(l.id).kind === "fixed" ? "ج" : ""}</small></span><span class="q"><button data-q="${i}:1">+</button> ${l.qty} <button data-q="${i}:-1">−</button></span></div>`).join("")}
   <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
   <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
-  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل"></textarea><button class="btn alt big" id="loc" type="button">📍 حدد موقعي بدقة</button><div class="msg" id="lm" role="status">الموقع الدقيق لم يُحدد بعد. اضغط الزر واسمح للمتصفح بالوصول للموقع.</div>
+  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل (أو استخدم تحديد الموقع)"></textarea><button class="btn alt big" id="loc" type="button">📍 حدد موقعي بدقة (اختياري)</button><div class="msg" id="lm" role="status">تحديد الموقع الدقيق اختياري: يمكنك كتابة العنوان بالتفصيل أو استخدام الزر لتحديده تلقائياً.</div>
   <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>الدفع عند الاستلام</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div><div class="msg" id="paymsg" role="status" aria-live="polite"></div>
   <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go">تأكيد الطلب</button>`;
   $("#sheet").hidden = false;
@@ -107,8 +107,14 @@ function openCheckout() {
 }
 async function submit() {
   const g = id => $(id).value.trim(), er = m => $("#er").textContent = m;
-  if (!loc || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) { er("حدد موقعك الدقيق أولاً من زر «حدد موقعي بدقة» واسمح للمتصفح بالوصول للموقع."); $("#lm").textContent = "لم يتم تحديد الموقع الدقيق بعد."; return; }
-  const body = { idem, name: g("#nm"), phone: g("#ph"), address: g("#ad"), lat: loc.lat, lng: loc.lng, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
+  const address = g("#ad");
+  const hasLocation = !!loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
+  if (!address && !hasLocation) {
+    er("من فضلك اكتب العنوان بالتفصيل في صندوق العنوان أو اضغط «حدد موقعي بدقة» لتحديده تلقائياً.");
+    $("#lm").textContent = "مطلوب واحد فقط: العنوان المكتوب أو الموقع الدقيق.";
+    return;
+  }
+  const body = { idem, name: g("#nm"), phone: g("#ph"), address, lat: hasLocation ? loc.lat : null, lng: hasLocation ? loc.lng : null, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
   $("#go").disabled = true; er("");
   try {
     const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), d = await r.json();
