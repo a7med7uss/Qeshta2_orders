@@ -208,3 +208,14 @@ test("طلب InstaPay لا يعرض رقمًا أو رابطًا مختلقًا 
   assert.equal(buttons.some(x => x.text?.includes("InstaPay IPA")), false);
   assert.equal(buttons.some(x => x.text?.includes("رابط InstaPay")), false);
 });
+
+test("طلب المحفظة يحذر المطبخ إذا لم يتم ضبط رقم التحويل", async () => {
+  const env = mkEnv();
+  env.WALLET_NUMBER = "";
+  sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "wallet-unconfigured-01", pay: "wallet" });
+  const message = sent.find(x => x.u === "sendMessage").b.text;
+  assert.ok(message.includes("رقم المحفظة غير مضبوط"));
+  const buttons = sent.find(x => x.u === "sendMessage").b.reply_markup.inline_keyboard.flat();
+  assert.equal(buttons.some(x => x.text === "💳 نسخ رقم المحفظة"), false);
+});
