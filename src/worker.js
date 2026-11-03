@@ -146,11 +146,15 @@ async function handleOrderAction(req, env) {
   let decision = "";
   if (req.method === "GET") token = new URL(req.url).searchParams.get("t") || "";
   else {
-    const origin = req.headers.get("origin") || (() => {
-      try { return new URL(req.headers.get("referer") || "").origin; } catch { return ""; }
-    })();
-    if (origin && origin !== ORDER_ACTION_BASE)
-      return orderActionHtml("تعذر تنفيذ الإجراء", "افتح الزر من رسالة الطلب داخل Telegram ثم حاول مرة أخرى.", "", "", 403);
+    // Telegram/Android WebViews may submit ordinary HTML forms with Origin: null.
+    // Prefer a concrete Origin, then Referer; if both are omitted/opaque, the HMAC
+    // capability token remains the authorization mechanism.
+    let observedOrigin = req.headers.get("origin") || "";
+    if (!observedOrigin || observedOrigin === "null") {
+      try { observedOrigin = new URL(req.headers.get("referer") || "").origin; } catch { observedOrigin = ""; }
+    }
+    if (observedOrigin && observedOrigin !== ORDER_ACTION_BASE)
+      return orderActionHtml("تعذر تنفيذ الإجراء", "رابط الإجراء غير موثوق. افتحه من رسالة الطلب داخل Telegram ثم حاول مرة أخرى.", "", "", 403);
     const form = await req.formData().catch(() => null);
     token = String(form && form.get("token") || "");
     decision = String(form && form.get("decision") || "");
