@@ -529,3 +529,41 @@ test("أمر /refreshorder يحدث أزرار الطلب القديم بدون 
   assert.ok(edited.b.reply_markup.inline_keyboard.flat().some(x => x.text === "✅ تأكيد الطلب" && x.url?.includes("/api/order-action")));
   assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "new");
 });
+
+test("Telegram Android WebView Origin:null لا يمنع تأكيد الطلب الموقّع", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "android-webview-null-origin-01" });
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  const url = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "✅ تأكيد الطلب").url;
+  const token = new URL(url).searchParams.get("t");
+  const form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const response = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", headers: { Origin: "null" }, body: form
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "confirmed");
+  const edited = sent.filter(x => x.u === "editMessageText").at(-1).b;
+  assert.ok(edited.text.includes("الحالة: تم التأكيد"));
+  assert.deepEqual(edited.reply_markup.inline_keyboard, []);
+});
+
+test("متصفح يحذف Origin وReferer يستطيع استعمال الرابط الموقّع فقط", async () => {
+  const env = mkEnv(); sent.length = 0;
+  await post(env, "/api/order", { ...ok, idem: "android-webview-no-origin-01" });
+  const msg = sent.find(x => x.u === "sendMessage").b;
+  const url = msg.reply_markup.inline_keyboard.flat().find(x => x.text === "❌ إلغاء الطلب").url;
+  const token = new URL(url).searchParams.get("t");
+  const form = new FormData();
+  form.set("token", token);
+  form.set("decision", "yes");
+  const response = await worker.fetch(new Request("https://qeshta2-orders.qeshta.workers.dev/api/order-action", {
+    method: "POST", body: form
+  }), env);
+  assert.equal(response.status, 200);
+  assert.equal(env.db.prepare("SELECT status FROM orders WHERE id=1").get().status, "cancelled");
+  const edited = sent.filter(x => x.u === "editMessageText").at(-1).b;
+  assert.ok(edited.text.includes("الحالة: تم الإلغاء"));
+  assert.deepEqual(edited.reply_markup.inline_keyboard.flat().map(x => x.text), ["♻️ إعادة إحياء الطلب"]);
+});
