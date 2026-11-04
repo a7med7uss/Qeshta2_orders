@@ -42,6 +42,19 @@ input[type=text],input[type=tel],textarea{width:100%;margin:6px 0;padding:12px 1
 .line{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--brown)}
 .q button{width:34px;height:34px;border-radius:50%;border:0;background:var(--brown);color:#fff;font-weight:800}
 .err{color:#ff8a80;min-height:22px}.hp{position:absolute;left:-9999px}
+.delivery-box{margin:12px 0;padding:14px;border:1px solid var(--brown);border-radius:16px;background:#211710}
+.delivery-box strong{display:block;margin-bottom:8px;color:var(--gold)}
+.delivery-fee{font:800 18px Cairo,sans-serif;color:var(--gold);margin-top:8px}
+.delivery-status{font-size:14px;line-height:1.8;margin-top:8px;color:#d8c8bd}
+button:disabled{opacity:.55;cursor:not-allowed}
+.loc-modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.78)}
+.loc-modal[hidden]{display:none}
+.loc-modal-card{width:min(100%,440px);padding:24px;border:1px solid #654c3d;border-radius:22px;background:#211611;color:var(--ink);box-shadow:0 18px 60px #000a;text-align:center}
+.loc-modal-card h3{margin:4px 0 10px;font-size:22px}
+.loc-modal-card p{line-height:1.9;color:#e1d3c9}
+.loc-modal-card .btn{display:block;width:100%;margin-top:10px;text-decoration:none}
+.loc-modal-card .help{font-size:13px;color:#c2b2a8}
+.loc-modal-card .plain{background:#3a2b23}
 .tot{font:700 17px Cairo,sans-serif;margin:10px 0}.snd{font-size:13px;opacity:.8}
 </style>
 </head>
@@ -59,13 +72,13 @@ import { nextStep, indexMenu, ladder } from "./lib/pricing.js";
 const $ = s => document.querySelector(s), IDX = indexMenu(MENU), COL = MENU.ui.size_colors;
 const mains = MENU.categories.filter(c => c.type === "main");
 const catOf = new Map(); MENU.categories.forEach(c => [...c.items, ...(c.additions || [])].forEach(i => catOf.set(i.id, c)));
-let tab = mains[0].id, cart = [], cur = null, idem = null, ts = null, tok = "", loc = null;
+let tab = mains[0].id, cart = [], cur = null, idem = null, ts = null, tok = "", loc = null, deliveryQuote = null;
 // ---- أصوات واهتزاز (تعمل بعد أول لمسة؛ مع كتم)
 let ctx; const on = () => $("#snd").checked;
 const tone = (f, t, d, g, ty = "sine") => { ctx ??= new (window.AudioContext || window.webkitAudioContext)(); ctx.resume?.(); const o = ctx.createOscillator(), v = ctx.createGain(), s = ctx.currentTime + t; o.type = ty; o.frequency.value = f; v.gain.setValueAtTime(.0001, s); v.gain.exponentialRampToValueAtTime(g, s + .008); v.gain.exponentialRampToValueAtTime(.0001, s + d); o.connect(v); v.connect(ctx.destination); o.start(s); o.stop(s + d + .02); };
 const buzz = p => { try { navigator.vibrate?.(p); } catch {} };
 const C5 = 523.25, E5 = 659.25, G5 = 783.99, C6 = 1046.5;
-const sfx = { tick: n => on() && (tone(C5 * 2 ** (Math.min(n, 8) / 12), 0, .06, .1), buzz(8)), flip: () => on() && (tone(C5, 0, .1, .14), tone(E5, .09, .16, .14), buzz([12, 40, 18])), limit: () => on() && (tone(329.63, 0, .12, .08, "triangle"), buzz(25)), add: () => on() && (tone(C5, 0, .08, .12), tone(G5, .07, .14, .12), buzz(15)), win: () => on() && ([C5, E5, G5].forEach((f, i) => tone(f, i * .09, .14, .12)), tone(C6, .27, .3, .14), tone(C6 * 2, .27, .2, .03), buzz([20, 50, 20, 50, 40])) };
+const sfx = { tick: n => on() && (tone(C5 * 2 ** (Math.min(n, 8) / 12), 0, .06, .1), buzz(8)), flip: () => on() && (tone(C5, 0, .1, .14), tone(E5, .09, .16, .14), buzz([12, 40, 18])), limit: () => on() && (tone(329.63, 0, .12, .08, "triangle"), buzz(25)), add: () => on() && (tone(C5, 0, .08, .12), tone(G5, .07, .14, .12), buzz(15)), win: () => on() && ([C5, E5, G5, C6].forEach((f, i) => tone(f, i * .105, .19, .095)), tone(G5, .44, .18, .07), buzz([18, 38, 18, 38, 42])) };
 // ---- المنيو
 const label = it => it.kind === "sized" ? "يبدأ من " + it.segments[0].base : it.kind === "single" ? "يبدأ من " + it.base : it.kind === "fixed" ? it.amount + " ج" : it.kind === "free" ? "مجانًا" : "السعر بالتليفون";
 const sec = (c, title) => `<h2>${title}</h2>` + [...c.items, ...(c.additions || [])].map(i => `<button class="it" data-id="${i.id}"><span>${i.name}</span><small>${label(i)}</small></button>`).join("");
@@ -95,33 +108,201 @@ function drawItem(msg = "") {
 function addLine(l) { const k = l.id + "|" + l.amount + "|" + l.note, f = cart.find(x => x.k === k); f ? f.qty++ : cart.push({ ...l, k }); sfx.add(); bar(); }
 // ---- السلة والدفع
 function openCheckout() {
-  idem ??= crypto.randomUUID(); const m = IDX; 
+  idem ??= crypto.randomUUID(); const m = IDX;
+  const deliveryText = deliveryQuote
+    ? `رسوم التوصيل: ${deliveryQuote.deliveryFee} جنيه`
+    : "رسوم التوصيل تظهر بعد تحديد موقعك.";
+  const locationText = deliveryQuote
+    ? "تم تحديد موقع التوصيل وحساب الرسوم بنجاح."
+    : "حدد موقعك أولاً حتى نحسب رسوم التوصيل تلقائياً.";
   $("#pane").innerHTML = `<h3>طلبك</h3>${cart.map((l, i) => `<div class="line"><span>${m.get(l.id).name}${l.note ? " <small>(" + l.note + ")</small>" : ""}<br><small>${m.get(l.id).kind === "fixed" ? m.get(l.id).amount : l.amount || ""} ${l.amount || m.get(l.id).kind === "fixed" ? "ج" : ""}</small></span><span class="q"><button data-q="${i}:1">+</button> ${l.qty} <button data-q="${i}:-1">−</button></span></div>`).join("")}
-  <div class="tot">الأكل ${total()} + التوصيل مجاني = <span style="color:var(--gold)">${total()} ج</span></div>
+  <div class="tot">قيمة الطعام: <span style="color:var(--gold)">${total()} جنيه</span></div>
   <input type="text" id="nm" placeholder="الاسم الثنائي" autocomplete="name"><input type="tel" id="ph" placeholder="رقم الموبايل (01XXXXXXXXX)" autocomplete="tel" inputmode="numeric">
-  <textarea id="ad" rows="2" placeholder="العنوان بالتفصيل (أو استخدم تحديد الموقع)"></textarea><button class="btn alt big" id="loc" type="button">📍 حدد موقعي بدقة (اختياري)</button><div class="msg" id="lm" role="status">تحديد الموقع الدقيق اختياري: يمكنك كتابة العنوان بالتفصيل أو استخدام الزر لتحديده تلقائياً.</div>
+  <div class="delivery-box">
+    <strong>📍 موقع التوصيل (مطلوب لحساب الرسوم)</strong>
+    <button class="btn alt big" id="loc" type="button">${deliveryQuote ? "✓ تم تحديد الموقع — تحديث" : "حدد موقعي تلقائياً"}</button>
+    <div class="delivery-status" id="lm" role="status" aria-live="polite">${locationText}</div>
+    <div class="delivery-fee" id="deliveryFee">${deliveryText}</div>
+  </div>
+  <textarea id="ad" rows="2" placeholder="عنوان إضافي، اسم البيت، رقم الشقة أو علامة مميزة (اختياري)"></textarea>
+  <div class="msg">العنوان المكتوب يساعد المندوب في الوصول، لكنه لا يغني عن تحديد GPS.</div>
   <div class="pay"><label><input type="radio" name="pay" value="cash" checked><span>الدفع عند الاستلام</span></label><label><input type="radio" name="pay" value="wallet"><span>محفظة</span></label><label><input type="radio" name="pay" value="instapay"><span>إنستا</span></label></div><div class="msg" id="paymsg" role="status" aria-live="polite"></div>
-  <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go">تأكيد الطلب</button>`;
+  <input class="hp" id="hp" tabindex="-1" autocomplete="off"><div id="ts"></div><div class="err" id="er"></div><button class="btn big" id="go" ${deliveryQuote ? "" : "disabled"}>تأكيد الطلب</button>`;
   $("#sheet").hidden = false;
   if (window.turnstile) { ts = turnstile.render("#ts", { sitekey: "0x4AAAAAAFcZSjYMCjWyaO2h", callback: t => tok = t, "expired-callback": () => tok = "" }); }
 }
 async function submit() {
   const g = id => $(id).value.trim(), er = m => $("#er").textContent = m;
-  const address = g("#ad");
-  const hasLocation = !!loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
-  if (!address && !hasLocation) {
-    er("من فضلك اكتب العنوان بالتفصيل في صندوق العنوان أو اضغط «حدد موقعي بدقة» لتحديده تلقائياً.");
-    $("#lm").textContent = "مطلوب واحد فقط: العنوان المكتوب أو الموقع الدقيق.";
+  if (!loc || !deliveryQuote?.quoteToken) {
+    er("حدد موقع التوصيل أولاً لحساب رسوم التوصيل.");
+    showLocationModal("missing");
     return;
   }
-  const body = { idem, name: g("#nm"), phone: g("#ph"), address, lat: hasLocation ? loc.lat : null, lng: hasLocation ? loc.lng : null, pay: document.querySelector("[name=pay]:checked").value, token: tok, hp: g("#hp"), lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note })) };
+  const body = {
+    idem,
+    name: g("#nm"),
+    phone: g("#ph"),
+    address: g("#ad"),
+    lat: loc.lat,
+    lng: loc.lng,
+    deliveryQuoteToken: deliveryQuote.quoteToken,
+    pay: document.querySelector("[name=pay]:checked").value,
+    token: tok,
+    hp: g("#hp"),
+    lines: cart.map(l => ({ id: l.id, amount: l.amount, qty: l.qty, note: l.note }))
+  };
   $("#go").disabled = true; er("");
   try {
-    const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), d = await r.json();
-    if (!r.ok) { er(d.error || "حصل خطأ، حاول تاني"); $("#go").disabled = false; window.turnstile && ts !== null && turnstile.reset(ts); tok = ""; return; }
-    cart = []; idem = null; loc = null; bar(); sfx.win();
-    $("#pane").innerHTML = `<div style="text-align:center"><div style="font-size:56px">🎉</div><h3>تم استلام طلبك</h3><p class="price" style="color:var(--gold)">${d.code}</p><p>هنتصل بيك على رقمك لتأكيد الطلب.</p><button class="btn big" id="x">تمام</button></div>`;
-  } catch { er("مفيش اتصال، حاول تاني"); $("#go").disabled = false; }
+    const r = await fetch("/api/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) {
+      er(d.error || "حصل خطأ، حاول تاني");
+      if (d.code === "DELIVERY_OUT_OF_RANGE") showDeliveryUnavailable(d.error);
+      else if (d.code === "DELIVERY_PRICE_CHANGED" || d.code === "DELIVERY_QUOTE_REQUIRED") {
+        deliveryQuote = null;
+        $("#deliveryFee").textContent = "أعد تحديد الموقع لتحديث رسوم التوصيل.";
+        $("#lm").textContent = d.error || "أعد تحديد الموقع.";
+        $("#loc").textContent = "تحديث الموقع وحساب الرسوم";
+      }
+      $("#go").disabled = !deliveryQuote;
+      window.turnstile && ts !== null && turnstile.reset(ts); tok = "";
+      return;
+    }
+    cart = []; idem = null; loc = null; deliveryQuote = null; bar(); sfx.win();
+    $("#pane").innerHTML = `<div style="text-align:center"><div style="font-size:56px">🎉</div><h3>تم استلام طلبك</h3><p class="price" style="color:var(--gold)">${d.code}</p><p>رسوم التوصيل: ${d.deliveryFee} جنيه</p><p>الإجمالي: ${d.total} جنيه</p><p>هنتصل بيك على رقمك لتأكيد الطلب.</p><button class="btn big" id="x">تمام</button></div>`;
+  } catch {
+    er("مفيش اتصال، حاول تاني");
+    $("#go").disabled = !deliveryQuote;
+  }
+}
+
+function showLocationModal(kind) {
+  const modal = $("#locationModal");
+  if (!modal) return;
+  const android = /Android/i.test(navigator.userAgent || "");
+  $("#androidLocationSettings").hidden = !android;
+  $("#iosLocationHelp").hidden = android;
+  $("#locationManualHelp").hidden = false;
+  if (kind === "permission") {
+    $("#locationModalTitle").textContent = "اسمح للموقع بالوصول إلى موقعك";
+    $("#locationModalText").textContent = "إذن الموقع مرفوض حالياً. فعّل صلاحية الموقع لهذا الموقع من إعدادات المتصفح، ثم ارجع واضغط حاول مرة أخرى.";
+  } else if (kind === "device") {
+    $("#locationModalTitle").textContent = "فعّل خدمة الموقع في هاتفك";
+    $("#locationModalText").textContent = "يبدو أن خدمة تحديد الموقع في الهاتف مغلقة أو غير متاحة. فعّلها ثم ارجع إلى قشطة.";
+  } else {
+    $("#locationModalTitle").textContent = "حدد موقع التوصيل أولاً";
+    $("#locationModalText").textContent = "نحتاج موقع GPS لحساب رسوم التوصيل تلقائياً. اضغط تفعيل الموقع أو حاول مرة أخرى بعد السماح للمتصفح.";
+  }
+  $("#locationModal").hidden = false;
+}
+function showDeliveryUnavailable(message) {
+  $("#locationModalTitle").textContent = "نأسف، التوصيل غير متاح";
+  $("#locationModalText").textContent = message || "نأسف، التوصيل إلى هذا الموقع غير متاح حالياً. يمكنك التواصل مع المطعم للاستفسار.";
+  $("#androidLocationSettings").hidden = true;
+  $("#iosLocationHelp").hidden = true;
+  $("#locationManualHelp").hidden = true;
+  $("#modalRetry").textContent = "تحديد موقع آخر";
+  $("#locationModal").hidden = false;
+}
+async function requestDeliveryLocation(button) {
+  deliveryQuote = null;
+  loc = null;
+  $("#go").disabled = true;
+  $("#deliveryFee").textContent = "في انتظار تحديد موقعك...";
+  const status = $("#lm");
+  button.disabled = true;
+  button.textContent = "جارٍ تحديد موقعك...";
+  status.textContent = "نحاول تحديد موقعك بدقة. خليك فاتح الصفحة لحد ما يكتمل التحديد.";
+  try {
+    if (!navigator.geolocation) {
+      button.disabled = false;
+      button.textContent = "حاول تحديد الموقع مرة أخرى";
+      status.textContent = "المتصفح لا يدعم تحديد الموقع.";
+      showLocationModal("device");
+      return;
+    }
+    try {
+      const permission = await navigator.permissions?.query({ name: "geolocation" });
+      if (permission?.state === "denied") {
+        button.disabled = false;
+        button.textContent = "حاول تحديد الموقع مرة أخرى";
+        status.textContent = "إذن الموقع مرفوض من إعدادات المتصفح.";
+        showLocationModal("permission");
+        return;
+      }
+    } catch {
+      // Permissions API is not available in every mobile browser; getCurrentPosition remains the fallback.
+    }
+    navigator.geolocation.getCurrentPosition(async position => {
+      const lat = Number(position.coords.latitude.toFixed(6));
+      const lng = Number(position.coords.longitude.toFixed(6));
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        button.disabled = false;
+        button.textContent = "حاول تحديد الموقع مرة أخرى";
+        status.textContent = "تعذر قراءة موقعك بشكل صحيح. حاول مرة أخرى.";
+        return;
+      }
+      loc = { lat, lng };
+      status.textContent = "تم تحديد موقعك بنجاح، جاري حساب رسوم التوصيل...";
+      $("#deliveryFee").textContent = "جاري حساب الرسوم...";
+      try {
+        const response = await fetch("/api/delivery-quote", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ lat, lng })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          deliveryQuote = null;
+          $("#go").disabled = true;
+          if (result.code === "DELIVERY_OUT_OF_RANGE") {
+            status.textContent = "هذا الموقع خارج نطاق التوصيل المتاح حالياً.";
+            $("#deliveryFee").textContent = "التوصيل غير متاح لهذا الموقع.";
+            showDeliveryUnavailable(result.error);
+          } else {
+            status.textContent = result.error || "تعذر حساب رسوم التوصيل.";
+            $("#deliveryFee").textContent = "لم يتم حساب الرسوم.";
+          }
+          button.textContent = "تحديث الموقع";
+          return;
+        }
+        deliveryQuote = { deliveryFee: Number(result.deliveryFee), quoteToken: result.quoteToken };
+        status.textContent = "تم تحديد موقع التوصيل بنجاح.";
+        $("#deliveryFee").textContent = "رسوم التوصيل: " + deliveryQuote.deliveryFee + " جنيه";
+        $("#go").disabled = false;
+        button.textContent = "✓ تم تحديد الموقع — تحديث";
+      } catch {
+        deliveryQuote = null;
+        $("#go").disabled = true;
+        status.textContent = "تعذر الاتصال لحساب رسوم التوصيل. حاول مرة أخرى.";
+        $("#deliveryFee").textContent = "لم يتم حساب الرسوم.";
+        button.textContent = "حاول حساب الرسوم مرة أخرى";
+      } finally {
+        button.disabled = false;
+      }
+    }, error => {
+      deliveryQuote = null;
+      loc = null;
+      $("#go").disabled = true;
+      button.disabled = false;
+      button.textContent = "حاول تحديد الموقع مرة أخرى";
+      $("#deliveryFee").textContent = "لم يتم حساب الرسوم.";
+      if (error.code === 1) {
+        status.textContent = "إذن الوصول للموقع غير مسموح.";
+        showLocationModal("permission");
+      } else if (error.code === 2) {
+        status.textContent = "خدمة الموقع في الهاتف مغلقة أو لم تستطع تحديد المكان.";
+        showLocationModal("device");
+      } else {
+        status.textContent = "استغرق تحديد الموقع وقتاً أطول من المتوقع. حاول مرة أخرى.";
+      }
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 15000 });
+  } catch {
+    button.disabled = false;
+    button.textContent = "حاول تحديد الموقع مرة أخرى";
+    status.textContent = "تعذر تشغيل خدمة تحديد الموقع في المتصفح.";
+    showLocationModal("device");
+  }
 }
 document.addEventListener("change", e => {
   const input = e.target;
@@ -143,42 +324,33 @@ document.addEventListener("click", e => {
   else if (t.id === "add") { const rm = [...document.querySelectorAll("[data-rm]:checked")].map(x => x.dataset.rm), note = [rm.length ? "بدون: " + rm.join("، ") : "", $("#note").value.trim()].filter(Boolean).join(" — "); addLine({ id: cur.it.id, amount: cur.amount, qty: 1, note }); close(); }
   else if (t.id === "bar") openCheckout();
   else if (t.dataset.q) { const [i, d] = t.dataset.q.split(":").map(Number); cart[i].qty += d; if (cart[i].qty < 1) cart.splice(i, 1); bar(); cart.length ? openCheckout() : close(); }
-  else if (t.id === "loc") {
-    const status = $("#lm");
-    if (!navigator.geolocation) {
-      loc = null;
-      status.textContent = "المتصفح لا يدعم تحديد الموقع. جرّب متصفحاً حديثاً واسمح بخدمة الموقع.";
-      return;
-    }
-    t.disabled = true;
-    t.textContent = "جارٍ تحديد موقعك...";
-    status.textContent = "نطلب موقع GPS بدقة عالية. وافق على رسالة الموقع التي سيعرضها المتصفح.";
-    navigator.geolocation.getCurrentPosition(p => {
-      const lat = Number(p.coords.latitude.toFixed(6));
-      const lng = Number(p.coords.longitude.toFixed(6));
-      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        loc = null;
-        status.textContent = "تعذر قراءة الإحداثيات. حاول مرة أخرى.";
-      } else {
-        loc = { lat, lng, accuracy: Math.round(p.coords.accuracy || 0) };
-        status.textContent = `تم تحديد الموقع وحفظه ✓ (دقة تقريبية ${loc.accuracy} متر) — ${lat}, ${lng}`;
-        t.textContent = "✓ تم تحديد الموقع — تحديث";
-      }
-      t.disabled = false;
-    }, error => {
-      loc = null;
-      const reason = error.code === 1 ? "رفضت إذن الموقع. افتح إعدادات الموقع في المتصفح واسمح للموقع." :
-        error.code === 2 ? "الجهاز لم يستطع تحديد الموقع. فعّل GPS وحاول قرب نافذة أو في مكان مفتوح." :
-        "انتهت مهلة تحديد الموقع. حاول مرة أخرى.";
-      status.textContent = reason;
-      t.textContent = "📍 حاول تحديد موقعي مرة أخرى";
-      t.disabled = false;
-    }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+  else if (t.id === "loc") requestDeliveryLocation(t);
+  else if (t.id === "go") submit();
+  else if (t.id === "modalRetry") {
+    $("#locationModal").hidden = true;
+    $("#modalRetry").textContent = "حاول مرة أخرى";
+    requestDeliveryLocation($("#loc"));
   }
-  else if (t.id === "go") submit(); else if (t.id === "x") close();
+  else if (t.id === "modalClose") {
+    $("#locationModal").hidden = true;
+    $("#modalRetry").textContent = "حاول مرة أخرى";
+  }
+  else if (t.id === "x") close();
 });
 $("#sheet").addEventListener("click", e => { if (e.target.id === "sheet") close(); });
 renderList();
 </script>
+<div id="locationModal" class="loc-modal" hidden role="dialog" aria-modal="true" aria-labelledby="locationModalTitle">
+  <div class="loc-modal-card">
+    <div style="font-size:42px">📍</div>
+    <h3 id="locationModalTitle">حدد موقع التوصيل</h3>
+    <p id="locationModalText">نحتاج موقع GPS لحساب رسوم التوصيل تلقائياً.</p>
+    <a id="androidLocationSettings" class="btn" href="intent://settings/#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;end" hidden>تفعيل الموقع في الهاتف</a>
+    <p id="iosLocationHelp" class="help" hidden>على iPhone: افتح الإعدادات ← الخصوصية والأمان ← خدمات الموقع، واسمح للمتصفح بالوصول إلى موقعك.</p>
+    <p id="locationManualHelp" class="help">إذا لم يفتح زر التفعيل، فعّل الموقع من لوحة الإعدادات السريعة، وتأكد من السماح للموقع لهذا المتصفح.</p>
+    <button class="btn alt" id="modalRetry" type="button">حاول مرة أخرى</button>
+    <button class="btn plain" id="modalClose" type="button">إغلاق</button>
+  </div>
+</div>
 </body>
 </html>
