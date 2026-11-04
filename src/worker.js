@@ -397,12 +397,12 @@ async function order(req, env) {
   } catch {
     return J({ error: "تعذر التحقق من الطلب، حاول مرة أخرى" }, 503);
   }
+  const deliveryQuote = await calculateDeliveryQuote(env, lat, lng);
+  if (!deliveryQuote.ok) return J({ ok: false, code: deliveryQuote.code, error: deliveryQuote.message }, deliveryQuote.status);
   const quoteToken = await verifyDeliveryQuoteToken(env, b.deliveryQuoteToken);
   if (!quoteToken || Math.abs(quoteToken.lat - lat) > 0.000001 || Math.abs(quoteToken.lng - lng) > 0.000001) {
     return J({ code: "DELIVERY_QUOTE_REQUIRED", error: "حدد موقعك مرة أخرى لحساب رسوم التوصيل قبل إرسال الطلب." }, 409);
   }
-  const deliveryQuote = await calculateDeliveryQuote(env, lat, lng);
-  if (!deliveryQuote.ok) return J({ ok: false, code: deliveryQuote.code, error: deliveryQuote.message }, deliveryQuote.status);
   if (quoteToken.fee !== deliveryQuote.fee) {
     return J({ code: "DELIVERY_PRICE_CHANGED", error: "تم تحديث رسوم التوصيل. راجع الرسوم الجديدة قبل تأكيد الطلب." }, 409);
   }
