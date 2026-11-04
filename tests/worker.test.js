@@ -187,6 +187,92 @@ test("GPS مطلوب لحساب التوصيل، والعنوان المكتوب
   assert.ok(message.text.includes("رسوم التوصيل: 0 جنيه"));
 });
 
+test("حساب رسوم التوصيل بخط مستقيم داخل Worker دون إظهار المسافة", async () => {
+  const env = mkEnv();
+  env.db.prepare("DELETE FROM delivery_rates").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(0,1,15,1)").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(1,2,25,1)").run();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+
+  const near = await post(env, "/api/delivery-quote", { lat: 30.105, lng: 31.2 });
+  const nearBody = await near.json();
+  assert.equal(near.status, 200);
+  assert.equal(nearBody.deliveryFee, 15);
+  assert.equal(Object.hasOwn(nearBody, "distanceKm"), false);
+  assert.equal(Object.hasOwn(nearBody, "distance"), false);
+  assert.ok(nearBody.quoteToken);
+
+  const farther = await post(env, "/api/delivery-quote", { lat: 30.115, lng: 31.2 });
+  const fartherBody = await farther.json();
+  assert.equal(farther.status, 200);
+  assert.equal(fartherBody.deliveryFee, 25);
+  assert.equal(Object.hasOwn(fartherBody, "distanceKm"), false);
+});
+
+test("الموقع خارج الحد المسموح يُرفض برسالة واضحة ولا ينشئ طلباً", async () => {
+  const env = mkEnv();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+  const response = await post(env, "/api/delivery-quote", { lat: 30.13, lng: 31.2 });
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.code, "DELIVERY_OUT_OF_RANGE");
+  assert.match(body.error, /التوصيل إلى هذا الموقع غير متاح/);
+  assert.equal(Object.hasOwn(body, "distanceKm"), false);
+
+  const bypass = await post(env, "/api/order", {
+    ...ok, idem: "outside-delivery-001", lat: 30.13, lng: 31.2, deliveryQuoteToken: "forged"
+  });
+  assert.equal(bypass.status, 422);
+  assert.equal((await bypass.json()).code, "DELIVERY_OUT_OF_RANGE");
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("رسوم التوصيل تُحفظ في D1 وتدخل في الإجمالي ورسالة المطبخ دون عرض الكيلومترات", async () => {
+  const env = mkEnv(); sent.length = 0;
+  env.db.prepare("DELETE FROM delivery_rates").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(0,2,25,1)").run();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+  const result = await post(env, "/api/order", {
+    ...ok, idem: "delivery-save-0001", lat: 30.11, lng: 31.2, address: "اسم البيت: بيت النخلة"
+  });
+  const response = await result.json();
+  assert.equal(result.status, 200);
+  assert.equal(response.deliveryFee, 25);
+  assert.equal(response.total, 195);
+  const row = env.db.prepare("SELECT delivery_fee,delivery_distance_km,total,address_text FROM orders WHERE idem_key=?").get("delivery-save-0001");
+  assert.equal(row.delivery_fee, 25);
+  assert.ok(row.delivery_distance_km > 1);
+  assert.equal(row.total, 195);
+  assert.equal(row.address_text, "اسم البيت: بيت النخلة");
+  const message = sent.find(x => x.u === "sendMessage").b.text;
+  assert.ok(message.includes("رسوم التوصيل: 25 جنيه"));
+  assert.ok(message.includes("الإجمالي: 195 جنيه"));
+  assert.ok(message.includes("اسم البيت: بيت النخلة"));
+  assert.equal(/\d+(?:\.\d+)?\s*كم/.test(message), false);
+});
+
+test("رسوم التوصيل غير المهيأة تمنع عرض سعر أو طلب غير محسوب", async () => {
+  const env = mkEnv();
+  env.db.prepare("DELETE FROM delivery_settings").run();
+  const quote = await post(env, "/api/delivery-quote", { lat: 30.1, lng: 31.2 });
+  assert.equal(quote.status, 503);
+  assert.equal((await quote.json()).code, "DELIVERY_NOT_CONFIGURED");
+  const orderResponse = await post(env, "/api/order", { ...ok, idem: "delivery-unconfigured-01" });
+  assert.equal(orderResponse.status, 503);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("رابط تسعير مزور أو منتهي لا يسمح بإنشاء طلب", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const quoteResponse = await post(env, "/api/delivery-quote", { lat: 30.1, lng: 31.2 });
+  const quote = await quoteResponse.json();
+  const forged = await post(env, "/api/order", {
+    ...ok, idem: "delivery-forged-0001", deliveryQuoteToken: quote.quoteToken.slice(0, -4) + "fake"
+  });
+  assert.equal(forged.status, 409);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
 test("حفظ إحداثيات الموقع الدقيق في D1 وإظهار أزرار الخرائط", async () => {
   const env = mkEnv(); sent.length = 0;
   await post(env, "/api/order", { ...ok, idem: "coords-save-0001", lat: 30.123456, lng: 31.654321 });
