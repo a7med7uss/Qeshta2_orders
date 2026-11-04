@@ -25,7 +25,7 @@ globalThis.fetch = async (u, i) => {
 };
 const post = async (env, path, body, h = {}) => {
   let payload = body;
-  if (path === "/api/order" && Number.isFinite(Number(body.lat)) && Number.isFinite(Number(body.lng)) && !body.deliveryQuoteToken) {
+  if (path === "/api/order" && env.WEBHOOK_SECRET && env.BOT_TOKEN && env.CHAT_ID && Number.isFinite(Number(body.lat)) && Number.isFinite(Number(body.lng)) && !body.deliveryQuoteToken) {
     const quoteResponse = await worker.fetch(new Request("https://x/api/delivery-quote", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ lat: Number(body.lat), lng: Number(body.lng) })
