@@ -680,3 +680,10 @@ test("Cron retry runs every five minutes, not every minute", async () => {
   const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   assert.deepEqual(config.triggers.crons, ["*/5 * * * *"]);
 });
+
+test("واجهة الموقع لا تعرض وصف التوصيل المجاني بعد تفعيل التسعير حسب GPS", async () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.ok(html.includes("رسوم التوصيل حسب موقعك"));
+  assert.equal(html.includes("التوصيل مجاني"), false);
+  assert.ok(html.includes("رسوم التوصيل:"));
+});
