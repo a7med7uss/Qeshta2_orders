@@ -25,7 +25,7 @@ export function indexMenu(menu) {
   for (const c of menu.categories) for (const it of [...c.items, ...(c.additions ?? [])]) m.set(it.id, it);
   return m;
 }
-// سطر الطلب: { id, amount, qty }. التوصيل مجاني دائماً. الصنف بلا سعر لا يدخل الإجمالي.
+// سطر الطلب: { id, amount, qty }. هذه الدالة تحسب الطعام فقط؛ رسوم التوصيل يحسبها Worker من GPS.
 export function priceCart(menu, lines) {
   const idx = indexMenu(menu); let subtotal = 0; const out = [];
   for (const l of lines) {

@@ -3,6 +3,8 @@ import worker from "../src/worker.js";
 const schema = readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8");
 function mkEnv() {
   const db = new DatabaseSync(":memory:"); db.exec(schema);
+  db.prepare("INSERT INTO delivery_settings(id,restaurant_lat,restaurant_lng,max_distance_km) VALUES(1,30.1,31.2,100)").run();
+  db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(0,100,0,1)").run();
   const prep = sql => { let a = []; const o = { bind: (...x) => (a = x, o), run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...a).changes) } }), first: async () => db.prepare(sql).get(...a) ?? null, all: async () => ({ results: db.prepare(sql).all(...a) }), _r: () => db.prepare(sql).run(...a) }; return o; };
   return { DB: { prepare: prep, batch: async s => s.forEach(x => x._r()) }, db, BOT_TOKEN: "t", CHAT_ID: "-100", OWNER_IDS: "6681233049", WEBHOOK_SECRET: "sec", TURNSTILE_SECRET: "turnstile-test-secret", WALLET_PROVIDER: "Vodafone Cash", WALLET_NUMBER: "01000000000", WALLET_OWNER: "Test Wallet Owner" };
 }
@@ -21,7 +23,23 @@ globalThis.fetch = async (u, i) => {
   }
   return { json: async () => ({ ok: true, success: true, result: { message_id: 42 } }) };
 };
-const post = (env, path, body, h = {}) => worker.fetch(new Request("https://x" + path, { method: "POST", headers: { "content-type": "application/json", ...h }, body: JSON.stringify(body) }), env);
+const post = async (env, path, body, h = {}) => {
+  let payload = body;
+  if (path === "/api/order" && env.WEBHOOK_SECRET && env.BOT_TOKEN && env.CHAT_ID && Number.isFinite(Number(body.lat)) && Number.isFinite(Number(body.lng)) && !body.deliveryQuoteToken) {
+    const quoteResponse = await worker.fetch(new Request("https://x/api/delivery-quote", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lat: Number(body.lat), lng: Number(body.lng) })
+    }), env);
+    if (quoteResponse.ok) {
+      const quote = await quoteResponse.json();
+      payload = { ...body, deliveryQuoteToken: quote.quoteToken };
+    }
+  }
+  return worker.fetch(new Request("https://x" + path, {
+    method: "POST", headers: { "content-type": "application/json", ...h },
+    body: JSON.stringify(payload)
+  }), env);
+};
 const ok = { idem: "idem-test-0001", name: "أحمد محمد", phone: "01012345678", address: "شارع النصر", lat: 30.1, lng: 31.2, pay: "cash", lines: [{ id: "c01", amount: 120, qty: 1, note: "" }, { id: "cf10", qty: 2 }] };
 const tgHook = (env, upd, secret = "sec") => post(env, "/api/tg", upd, { "x-telegram-bot-api-secret-token": secret });
 const press = (uid, to, id = 1) => ({ callback_query: { id: "q", data: `s:${id}:${to}`, from: { id: uid, first_name: "س" }, message: { chat: { id: -100 }, message_id: 42, text: "طلب" } } });
@@ -144,7 +162,7 @@ test("إعادة نفس الطلب لا تُرفض بسبب حد الطلبات"
   assert.equal(sent.filter(x => x.u === "sendMessage").length, 1);
 });
 
-test("العنوان المكتوب يكفي، والموقع الدقيق اختياري، والإحداثيات الجزئية ترفض", async () => {
+test("GPS مطلوب لحساب التوصيل، والعنوان المكتوب مجرد تفاصيل إضافية", async () => {
   const env = mkEnv();
   const missing = { ...ok, address: "", lat: undefined, lng: undefined };
   const partial = { ...ok, address: "", lat: 30.1, lng: undefined };
@@ -155,18 +173,104 @@ test("العنوان المكتوب يكفي، والموقع الدقيق اخ�
   assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
 
   sent.length = 0;
-  const addressOnly = { ...ok, idem: "address-only-0001", address: "شارع النصر بجوار المدرسة", lat: null, lng: null };
-  const response = await post(env, "/api/order", addressOnly);
+  const gpsOnly = { ...ok, idem: "gps-only-0001", address: "" };
+  const response = await post(env, "/api/order", gpsOnly);
   assert.equal(response.status, 200);
-  const row = env.db.prepare("SELECT address_text,lat,lng FROM orders WHERE idem_key=?").get("address-only-0001");
-  assert.equal(row.address_text, "شارع النصر بجوار المدرسة");
-  assert.equal(row.lat, null);
-  assert.equal(row.lng, null);
+  const row = env.db.prepare("SELECT address_text,lat,lng,delivery_fee,total FROM orders WHERE idem_key=?").get("gps-only-0001");
+  assert.equal(row.address_text, "");
+  assert.equal(row.lat, 30.1);
+  assert.equal(row.lng, 31.2);
+  assert.equal(row.delivery_fee, 0);
+  assert.equal(row.total, 170);
   const message = sent.find(x => x.u === "sendMessage").b;
-  assert.ok(message.text.includes("شارع النصر بجوار المدرسة"));
-  const buttons = message.reply_markup.inline_keyboard.flat();
-  assert.equal(buttons.some(x => x.text === "📍 Google Maps"), false);
-  assert.equal(buttons.some(x => x.text === "🍎 Apple Maps"), false);
+  assert.ok(message.text.includes("إحداثيات الموقع: 30.1, 31.2"));
+  assert.ok(message.text.includes("رسوم التوصيل: 0 جنيه"));
+});
+
+test("حساب رسوم التوصيل بخط مستقيم داخل Worker دون إظهار المسافة", async () => {
+  const env = mkEnv();
+  env.db.prepare("DELETE FROM delivery_rates").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(0,1,15,1)").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(1,2,25,1)").run();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+
+  const near = await post(env, "/api/delivery-quote", { lat: 30.105, lng: 31.2 });
+  const nearBody = await near.json();
+  assert.equal(near.status, 200);
+  assert.equal(nearBody.deliveryFee, 15);
+  assert.equal(Object.hasOwn(nearBody, "distanceKm"), false);
+  assert.equal(Object.hasOwn(nearBody, "distance"), false);
+  assert.ok(nearBody.quoteToken);
+
+  const farther = await post(env, "/api/delivery-quote", { lat: 30.115, lng: 31.2 });
+  const fartherBody = await farther.json();
+  assert.equal(farther.status, 200);
+  assert.equal(fartherBody.deliveryFee, 25);
+  assert.equal(Object.hasOwn(fartherBody, "distanceKm"), false);
+});
+
+test("الموقع خارج الحد المسموح يُرفض برسالة واضحة ولا ينشئ طلباً", async () => {
+  const env = mkEnv();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+  const response = await post(env, "/api/delivery-quote", { lat: 30.13, lng: 31.2 });
+  const body = await response.json();
+  assert.equal(response.status, 422);
+  assert.equal(body.code, "DELIVERY_OUT_OF_RANGE");
+  assert.match(body.error, /التوصيل إلى هذا الموقع غير متاح/);
+  assert.equal(Object.hasOwn(body, "distanceKm"), false);
+
+  const bypass = await post(env, "/api/order", {
+    ...ok, idem: "outside-delivery-001", lat: 30.13, lng: 31.2, deliveryQuoteToken: "forged"
+  });
+  assert.equal(bypass.status, 422);
+  assert.equal((await bypass.json()).code, "DELIVERY_OUT_OF_RANGE");
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("رسوم التوصيل تُحفظ في D1 وتدخل في الإجمالي ورسالة المطبخ دون عرض الكيلومترات", async () => {
+  const env = mkEnv(); sent.length = 0;
+  env.db.prepare("DELETE FROM delivery_rates").run();
+  env.db.prepare("INSERT INTO delivery_rates(min_km,max_km,fee,active) VALUES(0,2,25,1)").run();
+  env.db.prepare("UPDATE delivery_settings SET max_distance_km=2 WHERE id=1").run();
+  const result = await post(env, "/api/order", {
+    ...ok, idem: "delivery-save-0001", lat: 30.11, lng: 31.2, address: "اسم البيت: بيت النخلة"
+  });
+  const response = await result.json();
+  assert.equal(result.status, 200);
+  assert.equal(response.deliveryFee, 25);
+  assert.equal(response.total, 195);
+  const row = env.db.prepare("SELECT delivery_fee,delivery_distance_km,total,address_text FROM orders WHERE idem_key=?").get("delivery-save-0001");
+  assert.equal(row.delivery_fee, 25);
+  assert.ok(row.delivery_distance_km > 1);
+  assert.equal(row.total, 195);
+  assert.equal(row.address_text, "اسم البيت: بيت النخلة");
+  const message = sent.find(x => x.u === "sendMessage").b.text;
+  assert.ok(message.includes("رسوم التوصيل: 25 جنيه"));
+  assert.ok(message.includes("الإجمالي: 195 جنيه"));
+  assert.ok(message.includes("اسم البيت: بيت النخلة"));
+  assert.equal(/\d+(?:\.\d+)?\s*كم/.test(message), false);
+});
+
+test("رسوم التوصيل غير المهيأة تمنع عرض سعر أو طلب غير محسوب", async () => {
+  const env = mkEnv();
+  env.db.prepare("DELETE FROM delivery_settings").run();
+  const quote = await post(env, "/api/delivery-quote", { lat: 30.1, lng: 31.2 });
+  assert.equal(quote.status, 503);
+  assert.equal((await quote.json()).code, "DELIVERY_NOT_CONFIGURED");
+  const orderResponse = await post(env, "/api/order", { ...ok, idem: "delivery-unconfigured-01" });
+  assert.equal(orderResponse.status, 503);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
+});
+
+test("رابط تسعير مزور أو منتهي لا يسمح بإنشاء طلب", async () => {
+  const env = mkEnv(); sent.length = 0;
+  const quoteResponse = await post(env, "/api/delivery-quote", { lat: 30.1, lng: 31.2 });
+  const quote = await quoteResponse.json();
+  const forged = await post(env, "/api/order", {
+    ...ok, idem: "delivery-forged-0001", deliveryQuoteToken: quote.quoteToken.slice(0, -4) + "fake"
+  });
+  assert.equal(forged.status, 409);
+  assert.equal(env.db.prepare("SELECT COUNT(*) c FROM orders").get().c, 0);
 });
 
 test("حفظ إحداثيات الموقع الدقيق في D1 وإظهار أزرار الخرائط", async () => {
@@ -331,14 +435,17 @@ test("طلب المحفظة يحذر المطبخ إذا لم يتم ضبط رق
   assert.equal(buttons.some(x => x.text === "💳 نسخ رقم المحفظة"), false);
 });
 
-test("الواجهة تجعل GPS اختيارياً وتطلب عنواناً أو موقعاً واحداً على الأقل", async () => {
+test("الواجهة تجعل GPS أساساً إلزامياً والعنوان المكتوب تفصيلاً اختيارياً", async () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
   assert.ok(html.includes("enableHighAccuracy: true"));
-  assert.ok(html.includes("timeout: 25000"));
-  assert.ok(html.includes("تحديد الموقع الدقيق اختياري"));
-  assert.ok(html.includes("if (!address && !hasLocation)"));
-  assert.ok(html.includes("lat: hasLocation ? loc.lat : null"));
-  assert.ok(html.includes("navigator.geolocation.getCurrentPosition"));
+  assert.ok(html.includes("timeout: 20000"));
+  assert.ok(html.includes("موقع التوصيل (مطلوب لحساب الرسوم)"));
+  assert.ok(html.includes("عنوان إضافي، اسم البيت، رقم الشقة أو علامة مميزة (اختياري)"));
+  assert.ok(html.includes('if (!loc || !deliveryQuote?.quoteToken)'));
+  assert.ok(html.includes('fetch("/api/delivery-quote"'));
+  assert.ok(html.includes('href="intent://settings/#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;end"'));
+  assert.ok(html.includes('رسوم التوصيل: " + deliveryQuote.deliveryFee + " جنيه'));
+  assert.equal(html.includes("المسافة بالكيلومتر"), false);
 });
 
 test("إعادة رسم صفحة الدفع لا تمسح GPS المختار، ويمسح بعد نجاح الطلب", async () => {
@@ -572,4 +679,11 @@ test("متصفح يحذف Origin وReferer يستطيع استعمال الرا�
 test("Cron retry runs every five minutes, not every minute", async () => {
   const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
   assert.deepEqual(config.triggers.crons, ["*/5 * * * *"]);
+});
+
+test("واجهة الموقع لا تعرض وصف التوصيل المجاني بعد تفعيل التسعير حسب GPS", async () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.ok(html.includes("رسوم التوصيل حسب موقعك"));
+  assert.equal(html.includes("التوصيل مجاني"), false);
+  assert.ok(html.includes("رسوم التوصيل:"));
 });

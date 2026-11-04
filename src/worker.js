@@ -43,6 +43,7 @@ function orderWhatsAppMessage(o, items, env) {
     "",
     summary,
     "",
+    `رسوم التوصيل: ${Number(o.delivery_fee || 0)} جنيه.`,
     `الإجمالي: ${o.total} جنيه.`,
     `طريقة الدفع: ${o.pay === "wallet" ? "فودافون كاش" : o.pay === "cash" ? "الدفع عند الاستلام" : "إنستا باي غير متاح حالياً"}.`
   ];
@@ -245,7 +246,7 @@ function text(o, items, env = {}) {
     "━━━━━━━━━━━━━━━━━━",
     "💰 الحساب",
     `قيمة الأكل: ${o.subtotal} جنيه`,
-    "التوصيل: مجاني",
+    `رسوم التوصيل: ${Number(o.delivery_fee || 0)} جنيه`,
     `الإجمالي: ${o.total} جنيه`,
     `طريقة الدفع: ${PAY[o.pay]}`,
     ...(o.pay === "wallet" && !env.WALLET_NUMBER ? ["⚠️ رقم المحفظة غير مضبوط في إعدادات Worker؛ لا تحوّل قبل تأكيد المطعم."] : []),
@@ -271,6 +272,104 @@ async function sendOrder(env, id, o, items) {
   return r.ok;
 }
 
+const DELIVERY_EARTH_RADIUS_KM = 6371.0088;
+const DELIVERY_QUOTE_TTL_SECONDS = 10 * 60;
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const rad = value => value * Math.PI / 180;
+  const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * DELIVERY_EARTH_RADIUS_KM * Math.asin(Math.sqrt(Math.min(1, Math.max(0, a))));
+}
+function validCoordinates(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+async function calculateDeliveryQuote(env, lat, lng) {
+  if (!validCoordinates(lat, lng)) {
+    return { ok: false, status: 400, code: "INVALID_LOCATION", message: "الموقع الجغرافي غير صالح." };
+  }
+  try {
+    const settings = await env.DB.prepare(
+      "SELECT restaurant_lat,restaurant_lng,max_distance_km FROM delivery_settings WHERE id=1"
+    ).first();
+    if (!settings) {
+      return { ok: false, status: 503, code: "DELIVERY_NOT_CONFIGURED", message: "خدمة حساب التوصيل قيد الإعداد حالياً. حاول لاحقاً." };
+    }
+    const originLat = Number(settings.restaurant_lat);
+    const originLng = Number(settings.restaurant_lng);
+    const maxDistance = Number(settings.max_distance_km);
+    if (!validCoordinates(originLat, originLng) || !Number.isFinite(maxDistance) || maxDistance <= 0) {
+      return { ok: false, status: 503, code: "DELIVERY_CONFIG_INVALID", message: "تعذر إعداد نطاق التوصيل. تواصل مع المطعم." };
+    }
+    const distanceKm = haversineKm(originLat, originLng, lat, lng);
+    if (distanceKm > maxDistance) {
+      return {
+        ok: false,
+        status: 422,
+        code: "DELIVERY_OUT_OF_RANGE",
+        message: "نأسف، التوصيل إلى هذا الموقع غير متاح حالياً. يمكنك التواصل مع المطعم للاستفسار."
+      };
+    }
+    const rate = await env.DB.prepare(
+      "SELECT id,fee FROM delivery_rates WHERE active=1 AND min_km<=? AND max_km>=? ORDER BY min_km DESC LIMIT 1"
+    ).bind(distanceKm, distanceKm).first();
+    if (!rate || !Number.isInteger(Number(rate.fee)) || Number(rate.fee) < 0) {
+      return { ok: false, status: 503, code: "DELIVERY_RATE_MISSING", message: "تعذر تحديد رسوم التوصيل لهذا الموقع حالياً. تواصل مع المطعم." };
+    }
+    return {
+      ok: true,
+      fee: Number(rate.fee),
+      distanceKm: Math.round(distanceKm * 1000) / 1000,
+      rateId: Number(rate.id)
+    };
+  } catch (error) {
+    console.error("Delivery quote lookup failed:", error);
+    return { ok: false, status: 503, code: "DELIVERY_CONFIG_UNAVAILABLE", message: "تعذر حساب رسوم التوصيل حالياً. حاول مرة أخرى." };
+  }
+}
+async function createDeliveryQuoteToken(env, lat, lng, fee) {
+  const payload = encodeBase64Url(actionEncoder.encode(JSON.stringify({
+    type: "delivery_quote",
+    lat,
+    lng,
+    fee,
+    exp: Math.floor(Date.now() / 1000) + DELIVERY_QUOTE_TTL_SECONDS
+  })));
+  const key = await orderActionKey(env);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, actionEncoder.encode(payload)));
+  return payload + "." + encodeBase64Url(signature);
+}
+async function verifyDeliveryQuoteToken(env, token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+    const key = await orderActionKey(env);
+    const valid = await crypto.subtle.verify("HMAC", key, decodeBase64Url(parts[1]), actionEncoder.encode(parts[0]));
+    if (!valid) return null;
+    const value = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[0])));
+    if (value.type !== "delivery_quote" ||
+        !validCoordinates(value.lat, value.lng) ||
+        !Number.isInteger(value.fee) || value.fee < 0 ||
+        !Number.isSafeInteger(value.exp) || value.exp < Math.floor(Date.now() / 1000)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+async function deliveryQuote(req, env) {
+  let body;
+  try { body = await req.json(); } catch { return J({ error: "بيانات الموقع غير صالحة." }, 400); }
+  const lat = Number(body.lat), lng = Number(body.lng);
+  if (!validCoordinates(lat, lng)) return J({ code: "INVALID_LOCATION", error: "تعذر قراءة موقعك. حاول تحديده مرة أخرى." }, 400);
+  const quote = await calculateDeliveryQuote(env, lat, lng);
+  if (!quote.ok) return J({ ok: false, code: quote.code, error: quote.message }, quote.status);
+  const quoteToken = await createDeliveryQuoteToken(env, lat, lng, quote.fee);
+  // The customer receives the fee only. Exact distance is never returned to the browser.
+  return J({ ok: true, deliveryFee: quote.fee, quoteToken });
+}
+
 async function order(req, env) {
   let b; try { b = await req.json(); } catch { return J({ error: "طلب غير صالح" }, 400); }
   if (b.hp) return J({ ok: true, code: "QST-0000" }); // حقل مخفي للبوتات
@@ -287,17 +386,28 @@ async function order(req, env) {
   if (name.split(" ").length < 2 || name.length > 60) return J({ error: "اكتب الاسم الثنائي" }, 400);
   if (!/^01[0125]\d{8}$/.test(phone)) return J({ error: "رقم الموبايل غير صحيح" }, 400);
   if ((b.lat != null || b.lng != null) && !hasCoordinates) return J({ error: "الموقع الجغرافي غير صالح" }, 400);
-  if (!address && !hasCoordinates) return J({ error: "من فضلك اكتب العنوان بالتفصيل أو حدد موقعك من زر تحديد الموقع." }, 400);
+  if (!hasCoordinates) return J({ error: "حدد موقع التوصيل من زر GPS لحساب رسوم التوصيل." }, 400);
   if (!PAY[b.pay]) return J({ error: "اختر طريقة الدفع" }, 400);
   if (b.pay === "instapay") return J({ error: "InstaPay غير متاح حالياً. اختر الدفع عند الاستلام أو فودافون كاش." }, 400);
   if (!/^[\w-]{8,64}$/.test(String(b.idem || ""))) return J({ error: "طلب غير صالح" }, 400);
   // Idempotent retries must work even when the original one-use Turnstile token has expired.
   try {
-    const prior = await env.DB.prepare("SELECT code FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (prior) return J({ ok: true, code: prior.code, duplicate: true });
+    const prior = await env.DB.prepare("SELECT code,delivery_fee,total FROM orders WHERE idem_key=?").bind(b.idem).first();
+    if (prior) return J({ ok: true, code: prior.code, deliveryFee: Number(prior.delivery_fee || 0), total: Number(prior.total || 0), duplicate: true });
   } catch {
     return J({ error: "تعذر التحقق من الطلب، حاول مرة أخرى" }, 503);
   }
+  const deliveryQuote = await calculateDeliveryQuote(env, lat, lng);
+  if (!deliveryQuote.ok) return J({ ok: false, code: deliveryQuote.code, error: deliveryQuote.message }, deliveryQuote.status);
+  const quoteToken = await verifyDeliveryQuoteToken(env, b.deliveryQuoteToken);
+  if (!quoteToken || Math.abs(quoteToken.lat - lat) > 0.000001 || Math.abs(quoteToken.lng - lng) > 0.000001) {
+    return J({ code: "DELIVERY_QUOTE_REQUIRED", error: "حدد موقعك مرة أخرى لحساب رسوم التوصيل قبل إرسال الطلب." }, 409);
+  }
+  if (quoteToken.fee !== deliveryQuote.fee) {
+    return J({ code: "DELIVERY_PRICE_CHANGED", error: "تم تحديث رسوم التوصيل. راجع الرسوم الجديدة قبل تأكيد الطلب." }, 409);
+  }
+  const deliveryFee = deliveryQuote.fee;
+  const deliveryDistanceKm = deliveryQuote.distanceKm;
   // Fail closed: public order creation is unavailable until Turnstile is configured.
   if (!env.TURNSTILE_SECRET) return J({ error: "خدمة التحقق غير جاهزة، حاول لاحقاً" }, 503);
   const f = new FormData(); f.append("secret", env.TURNSTILE_SECRET); f.append("response", String(b.token || ""));
@@ -309,14 +419,14 @@ async function order(req, env) {
   let priced; try { priced = priceCart(MENU, raw.map(l => ({ id: String(l.id), amount: Number(l.amount), qty: Number(l.qty) }))); } catch (e) { return J({ error: e.message }, 400); }
   if (!priced.lines.length) return J({ error: "السلة فاضية" }, 400);
   const items = priced.lines.map((l, i) => ({ ...l, note: String(raw[i].note || "").slice(0, 120) }));
-  const o = { name, phone, address, lat, lng, pay: b.pay, subtotal: priced.subtotal, total: priced.total, created_at: new Date().toISOString() };
+  const o = { name, phone, address, lat, lng, pay: b.pay, subtotal: priced.subtotal, delivery_fee: deliveryFee, delivery_distance_km: deliveryDistanceKm, total: priced.subtotal + deliveryFee, created_at: new Date().toISOString() };
   let id = null;
   try {
     const recent = await env.DB.prepare(`SELECT COUNT(*) c FROM orders WHERE phone=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-10 minutes')`).bind(phone).first();
     if (recent.c >= 3) return J({ error: "عدد الطلبات كبير، اتصل بنا من فضلك" }, 429);
-    const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,total) VALUES(?,?,?,?,?,?,?,?,0,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, o.total).run();
-    const row = await env.DB.prepare("SELECT id,code FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // طلب متزامن بنفس مفتاح المنع
+    const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,delivery_distance_km,total) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, deliveryFee, deliveryDistanceKm, o.total).run();
+    const row = await env.DB.prepare("SELECT id,code,delivery_fee,total FROM orders WHERE idem_key=?").bind(b.idem).first();
+    if (!ins.meta.changes) return J({ ok: true, code: row.code, deliveryFee: Number(row.delivery_fee || 0), total: Number(row.total || 0), duplicate: true }); // طلب متزامن بنفس مفتاح المنع
     id = row.id; o.code = "QST-" + String(id).padStart(4, "0");
     await env.DB.batch([
       env.DB.prepare("UPDATE orders SET code=? WHERE id=?").bind(o.code, id),
@@ -328,12 +438,12 @@ async function order(req, env) {
     o.dbFail = true; o.code = "QST-E" + (Date.now() % 100000); id = null;
   }
   await sendOrder(env, id, o, items); // إن فشل الإرسال يعيده Cron كل دقيقة
-  return J({ ok: true, code: o.code });
+  return J({ ok: true, code: o.code, deliveryFee, total: o.total });
 }
 
 async function rowToOrder(env, r) {
   const its = (await env.DB.prepare("SELECT item_ref,name,size,qty,base_price,chosen_price,note FROM order_items WHERE order_id=?").bind(r.id).all()).results;
-  return [{ id: r.id, code: r.code, name: r.customer_name, phone: r.phone, address: r.address_text, lat: r.lat, lng: r.lng, pay: r.payment_method, subtotal: r.subtotal, total: r.total, created_at: r.created_at, status: r.status, cancel_reason: r.cancel_reason },
+  return [{ id: r.id, code: r.code, name: r.customer_name, phone: r.phone, address: r.address_text, lat: r.lat, lng: r.lng, pay: r.payment_method, subtotal: r.subtotal, delivery_fee: r.delivery_fee, delivery_distance_km: r.delivery_distance_km, total: r.total, created_at: r.created_at, status: r.status, cancel_reason: r.cancel_reason },
     its.map(i => ({ id: i.item_ref, name: i.name, size: i.size, qty: i.qty, base: i.base_price, unit: Math.max(i.chosen_price, 0), pend: i.chosen_price < 0, note: i.note }))];
 }
 async function retry(env) {
@@ -555,6 +665,7 @@ async function hook(req, env) {
 export default {
   async fetch(req, env) {
     const p = new URL(req.url).pathname;
+    if (p === "/api/delivery-quote" && req.method === "POST") return deliveryQuote(req, env);
     if (p === "/api/order" && req.method === "POST") return order(req, env);
     if (p === "/api/order-action") return handleOrderAction(req, env);
     if (p === "/api/tg" && req.method === "POST") return hook(req, env);
