@@ -567,3 +567,9 @@ test("متصفح يحذف Origin وReferer يستطيع استعمال الرا�
   assert.ok(edited.text.includes("الحالة: تم الإلغاء"));
   assert.deepEqual(edited.reply_markup.inline_keyboard.flat().map(x => x.text), ["♻️ إعادة إحياء الطلب"]);
 });
+
+
+test("Cron retry runs every five minutes, not every minute", async () => {
+  const config = JSON.parse(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+  assert.deepEqual(config.triggers.crons, ["*/5 * * * *"]);
+});
