@@ -426,7 +426,7 @@ async function order(req, env) {
     if (recent.c >= 3) return J({ error: "عدد الطلبات كبير، اتصل بنا من فضلك" }, 429);
     const ins = await env.DB.prepare("INSERT OR IGNORE INTO orders(idem_key,customer_name,phone,address_text,lat,lng,payment_method,subtotal,delivery_fee,delivery_distance_km,total) VALUES(?,?,?,?,?,?,?,?,?,?,?)").bind(b.idem, name, phone, address, lat, lng, b.pay, o.subtotal, deliveryFee, deliveryDistanceKm, o.total).run();
     const row = await env.DB.prepare("SELECT id,code,delivery_fee,total FROM orders WHERE idem_key=?").bind(b.idem).first();
-    if (!ins.meta.changes) return J({ ok: true, code: row.code, duplicate: true }); // طلب متزامن بنفس مفتاح المنع
+    if (!ins.meta.changes) return J({ ok: true, code: row.code, deliveryFee: Number(row.delivery_fee || 0), total: Number(row.total || 0), duplicate: true }); // طلب متزامن بنفس مفتاح المنع
     id = row.id; o.code = "QST-" + String(id).padStart(4, "0");
     await env.DB.batch([
       env.DB.prepare("UPDATE orders SET code=? WHERE id=?").bind(o.code, id),
