@@ -48,7 +48,7 @@ input[type=text],input[type=tel],textarea{width:100%;margin:6px 0;padding:12px 1
 .delivery-status{font-size:14px;line-height:1.8;margin-top:8px;color:#d8c8bd}
 button:disabled{opacity:.55;cursor:not-allowed}
 .loc-modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.78)}
-.loc-modal[hidden]{display:none}
+.loc-modal[hidden],#androidLocationSettings[hidden],#iosLocationHelp[hidden],#locationManualHelp[hidden]{display:none!important}
 .loc-modal-card{width:min(100%,440px);padding:24px;border:1px solid #654c3d;border-radius:22px;background:#211611;color:var(--ink);box-shadow:0 18px 60px #000a;text-align:center}
 .loc-modal-card h3{margin:4px 0 10px;font-size:22px}
 .loc-modal-card p{line-height:1.9;color:#e1d3c9}
@@ -59,7 +59,7 @@ button:disabled{opacity:.55;cursor:not-allowed}
 </style>
 </head>
 <body>
-<header><img src="https://qeshta-restaurant.vercel.app/Logo.webp" alt="مطعم قشطة" width="88" height="88"><h1>مطعم قشطة</h1><p>اطلب أونلاين · التوصيل مجاني 🛵</p><label class="snd"><input type="checkbox" id="snd" checked> الصوت</label></header>
+<header><img src="https://qeshta-restaurant.vercel.app/Logo.webp" alt="مطعم قشطة" width="88" height="88"><h1>مطعم قشطة</h1><p>اطلب أونلاين · رسوم التوصيل حسب موقعك 🛵</p><label class="snd"><input type="checkbox" id="snd" checked> الصوت</label></header>
 <nav id="tabs"></nav>
 <main id="list"></main>
 <button id="bar" class="btn" hidden></button>
@@ -177,6 +177,7 @@ async function submit() {
 }
 
 function showLocationModal(kind) {
+  $("#modalRetry").textContent = "حاول مرة أخرى";
   const modal = $("#locationModal");
   if (!modal) return;
   const android = /Android/i.test(navigator.userAgent || "");
